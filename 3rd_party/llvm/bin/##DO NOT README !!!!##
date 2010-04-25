@@ -1,8 +1,0 @@
-Please compile LLVM static-linked libraries on your machine.
-
-Brief Steps:
-1. Use CMake For Configuration Projects.
-2. Build generated LLVM solution using MSVC. We suggest the configuration "MinSizeRel" for your building.
-3. Copy all of libraries and binaries(toolchains) to corresponding folder.
-4. compile sasl2. 
-5. Enjoy it!
