@@ -13,7 +13,9 @@ Brief Steps:
 	##   Apr 25, 2010 UPDATED:
 	##   If some file compiling lead to vs2010 cl.exe crashed, please ignoring and report it.
 	
-4. Copy all of libraries and binaries(toolchains) to corresponding folder.
+4. Copy all of libraries and binaries(toolchains) to corresponding folder
+
+5. Copy the "$(build)/include/llvm" folder to "bin/include/$(platform)". And $(build) folder is the configuration files folder create by cmake, $(platform) folder is a configuration name such as "win32_msvc10".
 
 5. compile sasl2. 
 
