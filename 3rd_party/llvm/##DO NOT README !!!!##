@@ -17,6 +17,6 @@ Brief Steps:
 
 5. Copy the "$(build)/include/llvm" folder to "bin/include/$(platform)". And $(build) folder is the configuration files folder create by cmake, $(platform) folder is a configuration name such as "win32_msvc10".
 
-5. compile sasl2. 
+6. compile sasl2. 
 
-6. Enjoy it!
+7. Enjoy it!
