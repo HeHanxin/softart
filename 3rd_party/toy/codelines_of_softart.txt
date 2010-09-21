@@ -15,12 +15,12 @@ statistic directory: ../../sasl
 with extensions: .h;.cpp;.py;.xgt;xgp;.txt;.cmake
 result:
   files: 0
-  code lines: 9507
-  null lines: 2455
-  empty lines: 1041
+  code lines: 9539
+  null lines: 2469
+  empty lines: 1042
   single line comments: 648
-  multi line comments: 922
-  mixed lines: 69
-  total: 14642
-  file bytes(KB): 464.46
-  bytes per line: 32.48
+  multi line comments: 924
+  mixed lines: 73
+  total: 14695
+  file bytes(KB): 465.99
+  bytes per line: 32.47
