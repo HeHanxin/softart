@@ -2,25 +2,25 @@ statistic directory: ../../softart
 with extensions: .h;.cpp;.py;.xgt;xgp;.txt;.cmake
 result:
   files: 0
-  code lines: 16381
-  null lines: 3098
-  empty lines: 2582
-  single line comments: 502
-  multi line comments: 2603
-  mixed lines: 58
-  total: 25224
-  file bytes(KB): 647.82
-  bytes per line: 26.3
+  code lines: 15996
+  null lines: 2967
+  empty lines: 2557
+  single line comments: 548
+  multi line comments: 2944
+  mixed lines: 62
+  total: 25074
+  file bytes(KB): 651.22
+  bytes per line: 26.6
 statistic directory: ../../sasl
 with extensions: .h;.cpp;.py;.xgt;xgp;.txt;.cmake
 result:
   files: 0
-  code lines: 10564
-  null lines: 2689
-  empty lines: 1203
-  single line comments: 599
-  multi line comments: 1025
-  mixed lines: 72
-  total: 16152
-  file bytes(KB): 517.88
-  bytes per line: 32.83
+  code lines: 11321
+  null lines: 2940
+  empty lines: 1406
+  single line comments: 766
+  multi line comments: 831
+  mixed lines: 51
+  total: 17315
+  file bytes(KB): 543.63
+  bytes per line: 32.15
