@@ -44,10 +44,8 @@ def stat_dir( dir, ext_filters ):
 	processed_files = []
 	for root, subdirs, files in os.walk( dir ):
 		filterated_files = [ name for name in files if os.path.splitext(name)[1] in ext_filters ]
-		processed_files = [ stat_file(os.path.join(root, name), stat, total_file_size) for name in filterated_files ]
-	total = 0
-	for key in stat:
-		total += stat[key]
+		processed_files += [ stat_file(os.path.join(root, name), stat, total_file_size) for name in filterated_files ]
+	total = sum( stat.values() )
 	stat["total"] = total
 	stat["files"] = len( processed_files )
 	stat["file bytes(KB)"] = round(total_file_size[0] / 1024.0, 2)
