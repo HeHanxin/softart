@@ -17,6 +17,7 @@
 #include <stdio.h>    /* for vsnprintf()  */
 #include <stdlib.h>   /* for exit()       */
 #include <string.h>   /* for memset()     */
+#include <sys/types.h>/* for off_t */
 
 #include "X86DisassemblerDecoder.h"
 
@@ -537,7 +538,7 @@ static int getIDWithAttrMask(uint16_t* instructionID,
  * @param equiv - The instruction that is 16-bit
  */
 static BOOL is16BitEquvalent(const char* orig, const char* equiv) {
-  off_t i;
+  _off_t i;
   
   for (i = 0;; i++) {
     if (orig[i] == '\0' && equiv[i] == '\0')
@@ -564,7 +565,7 @@ static BOOL is16BitEquvalent(const char* orig, const char* equiv) {
  * @param equiv - The instruction that is 64-bit
  */
 static BOOL is64BitEquivalent(const char* orig, const char* equiv) {
-  off_t i;
+  _off_t i;
   
   for (i = 0;; i++) {
     if (orig[i] == '\0' && equiv[i] == '\0')
