@@ -1,0 +1,26 @@
+statistic directory: ../../softart
+with extensions: .h;.cpp;.py;.xgt;.xgp;.txt;.cmake
+result:
+  files: 182
+  code lines: 16275
+  null lines: 3036
+  empty lines: 2595
+  single line comments: 535
+  multi line comments: 2929
+  mixed lines: 61
+  total: 25431
+  file bytes(KB): 658.85
+  bytes per line: 26.53
+statistic directory: ../../sasl
+with extensions: .h;.cpp;.py;.xgt;.xgp;.txt;.cmake
+result:
+  files: 219
+  code lines: 13800
+  null lines: 3874
+  empty lines: 1829
+  single line comments: 1040
+  multi line comments: 1668
+  mixed lines: 55
+  total: 22266
+  file bytes(KB): 688.59
+  bytes per line: 31.67
