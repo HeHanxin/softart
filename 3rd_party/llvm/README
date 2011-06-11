@@ -2,7 +2,7 @@ Please compile LLVM static-linked libraries on your machine.
 
 Brief Steps:
 
-1. Download LLVM 2.8( or newer )
+1. Download LLVM 2.9( or newer )
 	
 2. Use CMake to configure projects.
 
