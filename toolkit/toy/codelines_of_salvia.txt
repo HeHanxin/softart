@@ -1,0 +1,78 @@
+statistic directory: ../../eflib
+with extensions: .h;.cpp;.py;.xgt;.xgp;.txt;.cmake
+result:
+  files: 52
+  code lines: 8677
+  null lines: 995
+  empty lines: 1178
+  single line comments: 230
+  multi line comments: 478
+  mixed lines: 6
+  total: 11564
+  file bytes(KB): 257.84
+  bytes per line: 22.83
+statistic directory: ../../salviar
+with extensions: .h;.cpp;.py;.xgt;.xgp;.txt;.cmake
+result:
+  files: 63
+  code lines: 5807
+  null lines: 1555
+  empty lines: 1120
+  single line comments: 168
+  multi line comments: 1144
+  mixed lines: 30
+  total: 9824
+  file bytes(KB): 283.17
+  bytes per line: 29.52
+statistic directory: ../../salviax
+with extensions: .h;.cpp;.py;.xgt;.xgp;.txt;.cmake
+result:
+  files: 36
+  code lines: 1736
+  null lines: 522
+  empty lines: 237
+  single line comments: 81
+  multi line comments: 847
+  mixed lines: 3
+  total: 3426
+  file bytes(KB): 101.15
+  bytes per line: 30.23
+statistic directory: ../../salviau
+with extensions: .h;.cpp;.py;.xgt;.xgp;.txt;.cmake
+result:
+  files: 17
+  code lines: 370
+  null lines: 129
+  empty lines: 60
+  single line comments: 43
+  multi line comments: 86
+  mixed lines: 12
+  total: 700
+  file bytes(KB): 16.93
+  bytes per line: 24.76
+statistic directory: ../../samples
+with extensions: .h;.cpp;.py;.xgt;.xgp;.txt;.cmake
+result:
+  files: 38
+  code lines: 1618
+  null lines: 461
+  empty lines: 293
+  single line comments: 158
+  multi line comments: 703
+  mixed lines: 34
+  total: 3267
+  file bytes(KB): 84.71
+  bytes per line: 26.55
+statistic directory: ../../sasl
+with extensions: .h;.cpp;.py;.xgt;.xgp;.txt;.cmake
+result:
+  files: 211
+  code lines: 14399
+  null lines: 4129
+  empty lines: 1971
+  single line comments: 660
+  multi line comments: 2538
+  mixed lines: 58
+  total: 23755
+  file bytes(KB): 716.15
+  bytes per line: 30.87
