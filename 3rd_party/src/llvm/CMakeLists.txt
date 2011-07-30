@@ -152,9 +152,13 @@ else()
 endif()
 
 option( LLVM_BOOST_STDINT  "Use platform independent integer typedefs from <boost/stdint.hpp> if compiler is not C99 compatible." OFF)
+
 set( LLVM_BOOST_DIR CACHE PATH "Additional path. If LLVM_BOOST_STDINT is enabled, it is the path of boost." )
 
-find_path( LLVM_BOOST_PATH config.hpp PATHS ${LLVM_BOOST_DIR}/boost )
+if( LLVM_BOOST_STDINT AND LLVM_BOOST_DIR)
+find_file( LLVM_BOOST_PATH cstdint.hpp PATHS ${LLVM_BOOST_DIR}/boost )
+endif()
+
 if ( LLVM_BOOST_PATH AND LLVM_BOOST_STDINT )
 	include_directories( ${LLVM_BOOST_DIR} )
 	set( HAVE_BOOST_SYS_TYPES 1 )
