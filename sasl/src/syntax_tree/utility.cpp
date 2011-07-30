@@ -105,7 +105,7 @@ public:
 		SAFE_ACCEPT( v.type_info );
 		applied( v, data );
 	}
-	SASL_VISIT_INLINE_DEF_UNIMPL( type_specifier );
+	SASL_VISIT_INLINE_DEF_UNIMPL( tynode );
 	SASL_VISIT_DCL( builtin_type ){
 		applied( v, data );
 	}
@@ -214,7 +214,7 @@ void follow_up_traversal( boost::shared_ptr<node> root, boost::function<void( no
 boost::shared_ptr<builtin_type> create_builtin_type( const builtin_types& btc )
 {
 	boost::shared_ptr<builtin_type> ret = create_node<builtin_type>( token_t::null() );
-	ret->value_typecode = btc;
+	ret->tycode = btc;
 	return ret;
 }
 
@@ -271,7 +271,7 @@ public:
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, cast_expression, (casted_type)(expr) );
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, binary_expression, (op)(left_expr)(right_expr) );
 	SASL_VISIT_INLINE_DEF_UNIMPL( expression_list );
-	SASL_VISIT_INLINE_DEF_UNIMPL( cond_expression );
+	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, cond_expression, (cond_expr)(yes_expr)(no_expr) );
 	SASL_VISIT_INLINE_DEF_UNIMPL( index_expression );
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, call_expression, (expr)(args) );
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, member_expression, (expr)(member) );
@@ -286,13 +286,13 @@ public:
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, variable_declaration, (type_info)(declarators) );
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, declarator, (name)(init)(semantic)(semantic_index) );
 	SASL_VISIT_INLINE_DEF_UNIMPL( type_definition );
-	SASL_VISIT_INLINE_DEF_UNIMPL( type_specifier );
-	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, builtin_type, (value_typecode)(qual)(tok) );
+	SASL_VISIT_INLINE_DEF_UNIMPL( tynode );
+	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, builtin_type, (tycode)(qual)(tok) );
 	SASL_VISIT_INLINE_DEF_UNIMPL( array_type );
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, struct_type, (name)(decls) );
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, alias_type, (alias) );
 	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, parameter, (param_type)(name)(init) );
-	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, function_type, (name)(retval_type)(params)(body)(value_typecode)(qual) );
+	SASL_CLONE_NODE_FUNCTION_DEF( SWALLOW, function_type, (name)(retval_type)(params)(body)(tycode)(qual) );
 
 	// statement
 	SASL_VISIT_INLINE_DEF_UNIMPL( statement );
@@ -335,9 +335,9 @@ public:
 	SASL_VISIT_INLINE_DEF_UNIMPL( variable_declaration );
 	SASL_VISIT_INLINE_DEF_UNIMPL( declarator );
 	SASL_VISIT_INLINE_DEF_UNIMPL( type_definition );
-	SASL_VISIT_INLINE_DEF_UNIMPL( type_specifier );
+	SASL_VISIT_INLINE_DEF_UNIMPL( tynode );
 
-	SASL_CLONE_NODE_FUNCTION_DEF( DEEP, builtin_type, (value_typecode)(qual)(tok) );
+	SASL_CLONE_NODE_FUNCTION_DEF( DEEP, builtin_type, (tycode)(qual)(tok) );
 
 	SASL_VISIT_INLINE_DEF_UNIMPL( array_type );
 	SASL_VISIT_INLINE_DEF_UNIMPL( struct_type );

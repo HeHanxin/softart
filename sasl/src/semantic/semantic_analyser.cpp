@@ -66,7 +66,7 @@ using ::sasl::syntax_tree::parameter;
 using ::sasl::syntax_tree::program;
 using ::sasl::syntax_tree::statement;
 using ::sasl::syntax_tree::struct_type;
-using ::sasl::syntax_tree::type_specifier;
+using ::sasl::syntax_tree::tynode;
 using ::sasl::syntax_tree::variable_declaration;
 using ::sasl::syntax_tree::variable_expression;
 using ::sasl::syntax_tree::dfunction_combinator;
@@ -117,12 +117,12 @@ sacontext const * ctxt_ptr( const any& any_val ){
 
 // utility functions
 
-shared_ptr<type_specifier> type_info_of( shared_ptr<node> n ){
+shared_ptr<tynode> type_info_of( shared_ptr<node> n ){
 	shared_ptr<type_info_si> typesi = extract_semantic_info<type_info_si>( n );
 	if ( typesi ){
 		return typesi->type_info();
 	}
-	return shared_ptr<type_specifier>();
+	return shared_ptr<tynode>();
 }
 
 semantic_analyser::semantic_analyser()
@@ -240,8 +240,8 @@ SASL_VISIT_DEF( binary_expression )
 	EFLIB_ASSERT_AND_IF( overloads.size() == 1,	( format(
 		"Need to report a compiler error. Ambigous overloading. \r\n"
 		"operator is %1%, left expression type is %2%, right expression type is %3%. \r\n" 
-		) % v.op.name() % type_info_of( dup_expr->left_expr )->value_typecode.name()
-		% type_info_of( dup_expr->right_expr )->value_typecode.name() ).str().c_str()
+		) % v.op.name() % type_info_of( dup_expr->left_expr )->tycode.name()
+		% type_info_of( dup_expr->right_expr )->tycode.name() ).str().c_str()
 		)
 	{
 		return;
@@ -273,7 +273,37 @@ SASL_VISIT_DEF( cond_expression ){
 	type_info_si* yes_tisi = dup_expr->yes_expr->si_ptr<type_info_si>();
 	type_info_si* no_tisi = dup_expr->no_expr->si_ptr<type_info_si>();
  
-	EFLIB_ASSERT_UNIMPLEMENTED();
+	assert( cond_tisi && yes_tisi && no_tisi );
+
+	if( cond_tisi && yes_tisi && no_tisi ) {
+		return;
+	}
+
+	type_entry::id_t bool_tid = msi->type_manager()->get( builtin_types::_boolean );
+
+	if( !typeconv->implicit_convertible( cond_tisi->entry_id(), bool_tid ) ){
+		EFLIB_ASSERT_UNIMPLEMENTED();
+		// TODO error: cannot convert conditional expression to boolean.
+		return;
+	}
+
+	SASL_GET_OR_CREATE_SI_P( storage_si, ssi, dup_expr, msi->type_manager() );
+
+	type_entry::id_t yes_tid = yes_tisi->entry_id();
+	type_entry::id_t no_tid = no_tisi->entry_id();
+
+	if( yes_tid == no_tid ){
+		ssi->entry_id( yes_tid );
+	} else if( typeconv->implicit_convertible(yes_tid, no_tid) ){
+		ssi->entry_id( yes_tid );
+	} else if( typeconv->implicit_convertible(no_tid, yes_tid) ){
+		ssi->entry_id( no_tid );
+	} else {
+		// TODO error: can not match the type.
+		return;
+	}
+
+	data_cptr()->generated_node = dup_expr;
 }
 
 SASL_VISIT_DEF_UNIMPL( index_expression );
@@ -364,7 +394,7 @@ SASL_VISIT_DEF( member_expression ){
 	SASL_EXTRACT_SI( type_info_si, arg_tisi, dup_expr->expr );
 	assert( arg_tisi );
 
-	shared_ptr<type_specifier> agg_type = arg_tisi->type_info();
+	shared_ptr<tynode> agg_type = arg_tisi->type_info();
 	type_entry::id_t mem_typeid = -1;
 
 	
@@ -382,7 +412,7 @@ SASL_VISIT_DEF( member_expression ){
 		assert( mem_typeid != -1 );
 	} else if( agg_type->is_builtin() ){
 		// Aggregated class is vector & matrix
-		builtin_types agg_btc = agg_type->value_typecode;
+		builtin_types agg_btc = agg_type->tycode;
 		int field_count = check_swizzle( agg_btc, v.member->str, swizzle_code );
 		if( field_count > 0 ){
 			builtin_types elem_btc = scalar_of( agg_btc );
@@ -549,12 +579,12 @@ SASL_VISIT_DEF( variable_declaration )
 }
 
 SASL_VISIT_DEF_UNIMPL( type_definition );
-SASL_VISIT_DEF_UNIMPL( type_specifier );
+SASL_VISIT_DEF_UNIMPL( tynode );
 SASL_VISIT_DEF( builtin_type ){
 	// create type information on current symbol.
 	// for e.g. create type info onto a variable node.
 	SASL_GET_OR_CREATE_SI_P( type_si, tsi, v, msi->type_manager() );
-	tsi->type_info( v.typed_handle<type_specifier>(), data_cptr()->parent_sym );
+	tsi->type_info( v.typed_handle<tynode>(), data_cptr()->parent_sym );
 
 	data_cptr()->generated_node = tsi->type_info()->handle();
 }
@@ -575,7 +605,7 @@ SASL_VISIT_DEF( struct_type ){
 
 	// Get from type pool or insert a new one.
 	type_entry::id_t dup_struct_id
-		= msi->type_manager()->get( v.typed_handle<type_specifier>(), data_cptr()->parent_sym );
+		= msi->type_manager()->get( v.typed_handle<tynode>(), data_cptr()->parent_sym );
 
 	assert( dup_struct_id != -1 );
 
@@ -614,7 +644,7 @@ SASL_VISIT_DEF( struct_type ){
 
 SASL_VISIT_DEF( alias_type ){
 	type_entry::id_t dup_struct_id
-		= msi->type_manager()->get( v.typed_handle<type_specifier>(), data_cptr()->parent_sym );
+		= msi->type_manager()->get( v.typed_handle<tynode>(), data_cptr()->parent_sym );
 	// TODO: If struct id not found, it means the type name is wrong.
 	// Compiler will report that.
 	assert( dup_struct_id != -1 );
@@ -661,7 +691,7 @@ SASL_VISIT_DEF( function_type )
 	any child_ctxt;
 
 	dup_fn->retval_type
-		= ctxt_ptr( visit_child( child_ctxt, child_ctxt_init, v.retval_type ) )->generated_node->typed_handle<type_specifier>();
+		= ctxt_ptr( visit_child( child_ctxt, child_ctxt_init, v.retval_type ) )->generated_node->typed_handle<tynode>();
 
 	for( vector< shared_ptr<parameter> >::iterator it = v.params.begin();
 		it != v.params.end(); ++it )
@@ -1155,38 +1185,43 @@ void semantic_analyser::register_builtin_functions( const boost::any& child_ctxt
 		}
 	}
 
-	// Intrinsics
-	shared_ptr<builtin_type> fvec_ts[5];
-	for( int i = 1; i <= 4; ++i ){
-		fvec_ts[i] = storage_bttbl[ vector_of( builtin_types::_float, i ) ];
-	}
-
-	shared_ptr<builtin_type> fmat_ts[5][5];
-	for( int vec_size = 1; vec_size < 5; ++vec_size ){
-		for( int n_vec = 1; n_vec < 5; ++n_vec ){
-			fmat_ts[vec_size][n_vec] = storage_bttbl[
-				matrix_of( builtin_types::_float, vec_size, n_vec )
-			];
-		}
-	}
-
-	for( size_t vec_size = 1; vec_size <= 4; ++vec_size){
-		for( size_t n_vec = 1; n_vec <= 4; ++n_vec ){
-
-			register_intrinsic(child_ctxt_init, "mul")
-				% fvec_ts[n_vec] % fmat_ts[vec_size][n_vec]
-			>> fvec_ts[vec_size];
-
-			register_intrinsic(child_ctxt_init, "mul")
-				% fmat_ts[vec_size][n_vec] % fvec_ts[vec_size]
-			>> fvec_ts[n_vec];
-
+	
+	{
+		/** @{ Intrinsics */
+		shared_ptr<builtin_type> fvec_ts[5];
+		for( int i = 1; i <= 4; ++i ){
+			fvec_ts[i] = storage_bttbl[ vector_of( builtin_types::_float, i ) ];
 		}
 
-		register_function(child_ctxt_init, "dot")
-			% fvec_ts[vec_size] % fvec_ts[vec_size]
-		>> BUILTIN_TYPE(_float);
+		shared_ptr<builtin_type> fmat_ts[5][5];
+		for( int vec_size = 1; vec_size < 5; ++vec_size ){
+			for( int n_vec = 1; n_vec < 5; ++n_vec ){
+				fmat_ts[vec_size][n_vec] = storage_bttbl[
+					matrix_of( builtin_types::_float, vec_size, n_vec )
+				];
+			}
+		}
+
+		for( size_t vec_size = 1; vec_size <= 4; ++vec_size){
+			for( size_t n_vec = 1; n_vec <= 4; ++n_vec ){
+
+				register_intrinsic(child_ctxt_init, "mul")
+					% fvec_ts[n_vec] % fmat_ts[vec_size][n_vec]
+				>> fvec_ts[vec_size];
+
+				register_intrinsic(child_ctxt_init, "mul")
+					% fmat_ts[vec_size][n_vec] % fvec_ts[vec_size]
+				>> fvec_ts[n_vec];
+
+			}
+
+			register_intrinsic(child_ctxt_init, "dot")
+				% fvec_ts[vec_size] % fvec_ts[vec_size]
+			>> BUILTIN_TYPE(_float);
+		}
+		/**@}*/
 	}
+	
 }
 
 void semantic_analyser::register_builtin_types(){

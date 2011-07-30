@@ -3,6 +3,8 @@
 
 #include <sasl/include/code_generator/llvm/cgllvm_impl.h>
 
+#include <sasl/include/code_generator/llvm/cgllvm_service.h>
+
 #include <eflib/include/platform/boost_begin.h>
 #include <boost/any.hpp>
 #include <boost/function.hpp>
@@ -18,7 +20,7 @@ namespace sasl{
 		class type_converter;
 	}
 	namespace syntax_tree{
-		struct type_specifier;
+		struct tynode;
 		struct node;	
 	}
 }
@@ -119,14 +121,17 @@ protected:
 	cgllvm_sctxt* node_ctxt( sasl::syntax_tree::node&, bool create_if_need = false );
 
 	// LLVM code generator Utilities
-	llvm::Constant* zero_value( boost::shared_ptr<sasl::syntax_tree::type_specifier> typespec );
+	llvm::Constant* zero_value( boost::shared_ptr<sasl::syntax_tree::tynode> typespec );
 
-	llvm::Value* load( boost::any* data );
-	llvm::Value* load( cgllvm_sctxt* data );
-	
-	llvm::Value* load_ptr( cgllvm_sctxt* data );
-	void store( llvm::Value*, boost::any* data );
-	void store( llvm::Value*, cgllvm_sctxt* data );
+	//llvm::Value* load( boost::any* data );
+	//llvm::Value* load( cgllvm_sctxt* data );
+	//
+	//llvm::Value* load_ptr( cgllvm_sctxt* data );
+	//void store( llvm::Value*, boost::any* data );
+	//void store( llvm::Value*, cgllvm_sctxt* data );
+
+	llvm::Value* to_abi( builtin_types hint, llvm::Value* v );
+	llvm::Value* from_abi( builtin_types hint, llvm::Value* v );
 
 	void mask_to_indexes( char index[4], uint32_t mask );
 
@@ -141,6 +146,12 @@ protected:
 	llvector<ElementT> mul_mv(
 		llvm::Value* m, llvm::Value* v,
 		size_t vec_size, size_t n_vec,
+		llvm::Type const* ret_type
+		);
+	template <typename ElementT>
+	ElementT dot_prod(
+		llvm::Value* lhs, llvm::Value* rhs,
+		size_t vec_size,
 		llvm::Type const* ret_type
 		);
 
