@@ -2,9 +2,18 @@
 #define SASL_CODE_GENERATOR_LLVM_CGLLVM_CONTEXTS_H
 
 #include <sasl/include/code_generator/forward.h>
+
 #include <sasl/include/code_generator/codegen_context.h>
+#include <sasl/include/code_generator/llvm/cgllvm_service.h>
 
 #include <eflib/include/platform/typedefs.h>
+
+#include <eflib/include/platform/boost_begin.h>
+#include <boost/shared_ptr.hpp>
+#include <boost/scoped_ptr.hpp>
+#include <eflib/include/platform/boost_end.h>
+
+#include <eflib/include/diagnostics/assert.h>
 
 namespace llvm{
 	// Node
@@ -44,64 +53,35 @@ struct cgllvm_sctxt_env{
 
 	bool is_semantic_mode;
 
-	llvm::Type const* declarator_type;
+	/// Type information used by declarator.
+	boost::shared_ptr<value_tyinfo> tyinfo;
 
 	cgllvm_sctxt* parent_struct;
 
-	llvm::Function* parent_fn;	// If generating code in function, it will be used.
+	/// If generating code in function, it will be used.
+	llvm::Function* parent_fn;	
+
 	llvm::BasicBlock* block;
 	
-	// Code blocks
-	llvm::BasicBlock* continue_to;
-	llvm::BasicBlock* break_to;
-
+	/// Current symbol scope.
 	boost::weak_ptr< sasl::semantic::symbol > sym;
+
+	/// The variable which will pass in initilizer to generate initialization code.
 	boost::weak_ptr< sasl::syntax_tree::node> variable_to_fill;
 };
 
 struct cgllvm_sctxt_data{
+
 	cgllvm_sctxt_data();
 
-	// Storage
-	// Only one of them is avaliable
-
-	// Treated as reference
-	// If it is true,
-	// Value must stored the address of value of val_type.
-	// e.g.
-	//  val_type = int
-	//	value = 0xDEADBEEF
-	//  is_ref = true
-	// load() = *(int*)value;
-	// *(int*)value = store()
-	bool is_ref;
-	llvm::Value* val;					// Argument and constant
-	llvm::GlobalVariable* global;
-	llvm::AllocaInst* local;
-	struct aggregated_data{
-		cgllvm_sctxt* parent;
-		union{
-			int index;
-			int32_t swizzle;
-		};
-		bool is_swizzle;
-	} agg;
-	
-	char const* hint_name;
-
 	// Functions
-	llvm::Function* self_fn;	// used by function type.
+	llvm::Function* self_fn;		///< used by function type.
 
-	// Types
-	llvm::Type const* ref_type;				// Pointer qualified val_type. Enabled when is_ref is true.
-	llvm::Type const* val_type;
-	bool is_signed;							// For integral only.
+	value_proxy						val;
+	boost::shared_ptr<value_tyinfo>	tyinfo;
 
-	// For declaration only
-	int declarator_count;
-
-	// Instructions
-	llvm::ReturnInst* return_inst;
+	/// The declarator count of declaration.
+	int declarator_count;			
 };
 
 class cgllvm_sctxt: public codegen_context{
@@ -129,10 +109,17 @@ public:
 	void data( cgllvm_sctxt_data const& rhs );
 	void data( cgllvm_sctxt const* rhs );
 
-	// Copy some special members
-	void storage( cgllvm_sctxt const* rhs );
-	void type( cgllvm_sctxt const* rhs );
-	void storage_and_type( cgllvm_sctxt* rhs );
+	/// @name Accessors.
+	/// Expose members in environment and data for easily using.
+	/// @{
+	value_tyinfo* get_typtr() const;
+	boost::shared_ptr<value_tyinfo> get_tysp() const;
+
+	value_proxy const& get_value() const;
+	value_proxy& get_value();
+
+	value_proxy get_rvalue() const;
+	/// @}
 
 private:
 	cgllvm_sctxt_data hold_data;

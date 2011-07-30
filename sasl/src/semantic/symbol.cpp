@@ -27,7 +27,7 @@ BEGIN_NS_SASL_SEMANTIC();
 
 using ::sasl::syntax_tree::expression;
 using ::sasl::syntax_tree::function_type;
-using ::sasl::syntax_tree::type_specifier;
+using ::sasl::syntax_tree::tynode;
 
 using ::boost::shared_ptr;
 
@@ -145,7 +145,7 @@ vector< shared_ptr<symbol> > symbol::find_overloads(
 					fmt % "parameter";
 				}
 				cout
-					<< str( fmt % ( arg_tisi->type_info()->is_builtin() ? arg_tisi->type_info()->value_typecode.name() : "<complex>") )
+					<< str( fmt % ( arg_tisi->type_info()->is_builtin() ? arg_tisi->type_info()->tycode.name() : "<complex>") )
 					<< endl;
 				assert( !"Argument type or parameter type is invalid." );
 				// TODO: Here is syntax error. Need to be processed.

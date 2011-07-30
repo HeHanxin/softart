@@ -29,7 +29,7 @@ namespace sasl{
 	}
 	namespace syntax_tree{
 		struct expression;
-		struct type_specifier;
+		struct tynode;
 		struct node;
 	}
 }
@@ -58,7 +58,6 @@ public:
 	SASL_VISIT_DCL( expression_list );
 	SASL_VISIT_DCL( cond_expression );
 	SASL_VISIT_DCL( index_expression );
-	SASL_VISIT_DCL( call_expression );
 
 	SASL_VISIT_DCL( identifier );
 
@@ -67,7 +66,7 @@ public:
 	SASL_VISIT_DCL( expression_initializer );
 	SASL_VISIT_DCL( member_initializer );
 	SASL_VISIT_DCL( type_definition );
-	SASL_VISIT_DCL( type_specifier );
+	SASL_VISIT_DCL( tynode );
 	SASL_VISIT_DCL( array_type );
 	SASL_VISIT_DCL( alias_type );
 	SASL_VISIT_DCL( parameter );
