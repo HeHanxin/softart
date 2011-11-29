@@ -27,20 +27,22 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/system_error.h"
 #include "llvm/Target/Mangler.h"
-#include "llvm/Target/SubtargetFeature.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCParser/MCAsmParser.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Target/TargetAsmParser.h"
+#include "llvm/MC/SubtargetFeature.h"
+#include "llvm/MC/MCTargetAsmParser.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegistry.h"
-#include "llvm/Target/TargetSelect.h"
+#include "llvm/Target/TargetRegisterInfo.h"
 
 using namespace llvm;
 
@@ -91,32 +93,33 @@ LTOModule *LTOModule::makeLTOModule(const char *path,
     errMsg = ec.message();
     return NULL;
   }
-  return makeLTOModule(buffer.get(), errMsg);
+  return makeLTOModule(buffer.take(), errMsg);
 }
 
 LTOModule *LTOModule::makeLTOModule(int fd, const char *path,
-                                    off_t size,
+                                    size_t size,
+                                    std::string &errMsg) {
+  return makeLTOModule(fd, path, size, size, 0, errMsg);
+}
+
+LTOModule *LTOModule::makeLTOModule(int fd, const char *path,
+                                    size_t file_size,
+                                    size_t map_size,
+                                    off_t offset,
                                     std::string &errMsg) {
   OwningPtr<MemoryBuffer> buffer;
-  if (error_code ec = MemoryBuffer::getOpenFile(fd, path, buffer, size)) {
+  if (error_code ec = MemoryBuffer::getOpenFile(fd, path, buffer, file_size,
+                                                map_size, offset, false)) {
     errMsg = ec.message();
     return NULL;
   }
-  return makeLTOModule(buffer.get(), errMsg);
+  return makeLTOModule(buffer.take(), errMsg);
 }
 
-/// makeBuffer - Create a MemoryBuffer from a memory range.  MemoryBuffer
-/// requires the byte past end of the buffer to be a zero.  We might get lucky
-/// and already be that way, otherwise make a copy.  Also if next byte is on a
-/// different page, don't assume it is readable.
+/// makeBuffer - Create a MemoryBuffer from a memory range.
 MemoryBuffer *LTOModule::makeBuffer(const void *mem, size_t length) {
   const char *startPtr = (char*)mem;
-  const char *endPtr = startPtr+length;
-  if (((uintptr_t)endPtr & (sys::Process::GetPageSize()-1)) == 0 ||
-      *endPtr != 0)
-    return MemoryBuffer::getMemBufferCopy(StringRef(startPtr, length));
-
-  return MemoryBuffer::getMemBuffer(StringRef(startPtr, length));
+  return MemoryBuffer::getMemBuffer(StringRef(startPtr, length), "", false);
 }
 
 
@@ -125,7 +128,7 @@ LTOModule *LTOModule::makeLTOModule(const void *mem, size_t length,
   OwningPtr<MemoryBuffer> buffer(makeBuffer(mem, length));
   if (!buffer)
     return NULL;
-  return makeLTOModule(buffer.get(), errMsg);
+  return makeLTOModule(buffer.take(), errMsg);
 }
 
 LTOModule *LTOModule::makeLTOModule(MemoryBuffer *buffer,
@@ -133,14 +136,18 @@ LTOModule *LTOModule::makeLTOModule(MemoryBuffer *buffer,
   static bool Initialized = false;
   if (!Initialized) {
     InitializeAllTargets();
+    InitializeAllTargetMCs();
     InitializeAllAsmParsers();
     Initialized = true;
   }
 
   // parse bitcode buffer
-  OwningPtr<Module> m(ParseBitcodeFile(buffer, getGlobalContext(), &errMsg));
-  if (!m)
+  OwningPtr<Module> m(getLazyBitcodeModule(buffer, getGlobalContext(),
+                                           &errMsg));
+  if (!m) {
+    delete buffer;
     return NULL;
+  }
 
   std::string Triple = m->getTargetTriple();
   if (Triple.empty())
@@ -151,13 +158,14 @@ LTOModule *LTOModule::makeLTOModule(MemoryBuffer *buffer,
   if (!march)
     return NULL;
 
-  // construct LTModule, hand over ownership of module and target
+  // construct LTOModule, hand over ownership of module and target
   SubtargetFeatures Features;
-  Features.getDefaultSubtargetFeatures("" /* cpu */, llvm::Triple(Triple));
+  Features.getDefaultSubtargetFeatures(llvm::Triple(Triple));
   std::string FeatureStr = Features.getString();
-  TargetMachine *target = march->createTargetMachine(Triple, FeatureStr);
+  std::string CPU;
+  TargetMachine *target = march->createTargetMachine(Triple, CPU, FeatureStr);
   LTOModule *Ret = new LTOModule(m.take(), target);
-  bool Err = Ret->ParseSymbols();
+  bool Err = Ret->ParseSymbols(errMsg);
   if (Err) {
     delete Ret;
     return NULL;
@@ -177,16 +185,6 @@ void LTOModule::setTargetTriple(const char *triple) {
 void LTOModule::addDefinedFunctionSymbol(Function *f, Mangler &mangler) {
   // add to list of defined symbols
   addDefinedSymbol(f, mangler, true);
-
-  // add external symbols referenced by this function.
-  for (Function::iterator b = f->begin(); b != f->end(); ++b) {
-    for (BasicBlock::iterator i = b->begin(); i != b->end(); ++i) {
-      for (unsigned count = 0, total = i->getNumOperands();
-           count != total; ++count) {
-        findExternalRefs(i->getOperand(count), mangler);
-      }
-    }
-  }
 }
 
 // Get string that data pointer points to.
@@ -197,7 +195,7 @@ bool LTOModule::objcClassNameFromExpression(Constant *c, std::string &name) {
       Constant *cn = gvn->getInitializer();
       if (ConstantArray *ca = dyn_cast<ConstantArray>(cn)) {
         if (ca->isCString()) {
-          name = ".objc_class_name_" + ca->getAsString();
+          name = ".objc_class_name_" + ca->getAsCString();
           return true;
         }
       }
@@ -214,7 +212,7 @@ void LTOModule::addObjCClass(GlobalVariable *clgv) {
     if (objcClassNameFromExpression(c->getOperand(1), superclassName)) {
       NameAndAttributes info;
       StringMap<NameAndAttributes>::value_type &entry =
-        _undefines.GetOrCreateValue(superclassName.c_str());
+        _undefines.GetOrCreateValue(superclassName);
       if (!entry.getValue().name) {
         const char *symbolName = entry.getKey().data();
         info.name = symbolName;
@@ -226,7 +224,7 @@ void LTOModule::addObjCClass(GlobalVariable *clgv) {
     std::string className;
     if (objcClassNameFromExpression(c->getOperand(2), className)) {
       StringSet::value_type &entry =
-        _defines.GetOrCreateValue(className.c_str());
+        _defines.GetOrCreateValue(className);
       entry.setValue(1);
       NameAndAttributes info;
       info.name = entry.getKey().data();
@@ -249,7 +247,7 @@ void LTOModule::addObjCCategory(GlobalVariable *clgv) {
       NameAndAttributes info;
 
       StringMap<NameAndAttributes>::value_type &entry =
-        _undefines.GetOrCreateValue(targetclassName.c_str());
+        _undefines.GetOrCreateValue(targetclassName);
 
       if (entry.getValue().name)
         return;
@@ -270,7 +268,7 @@ void LTOModule::addObjCClassRef(GlobalVariable *clgv) {
     NameAndAttributes info;
 
     StringMap<NameAndAttributes>::value_type &entry =
-      _undefines.GetOrCreateValue(targetclassName.c_str());
+      _undefines.GetOrCreateValue(targetclassName);
     if (entry.getValue().name)
       return;
 
@@ -327,12 +325,6 @@ void LTOModule::addDefinedDataSymbol(GlobalValue *v, Mangler &mangler) {
       }
     }
   }
-
-  // add external symbols referenced by this data.
-  for (unsigned count = 0, total = v->getNumOperands();
-       count != total; ++count) {
-    findExternalRefs(v->getOperand(count), mangler);
-  }
 }
 
 
@@ -340,10 +332,6 @@ void LTOModule::addDefinedSymbol(GlobalValue *def, Mangler &mangler,
                                  bool isFunction) {
   // ignore all llvm.* symbols
   if (def->getName().startswith("llvm."))
-    return;
-
-  // ignore available_externally
-  if (def->hasAvailableExternallyLinkage())
     return;
 
   // string is owned by _defines
@@ -391,7 +379,7 @@ void LTOModule::addDefinedSymbol(GlobalValue *def, Mangler &mangler,
 
   // add to table of symbols
   NameAndAttributes info;
-  StringSet::value_type &entry = _defines.GetOrCreateValue(Buffer.c_str());
+  StringSet::value_type &entry = _defines.GetOrCreateValue(Buffer);
   entry.setValue(1);
 
   StringRef Name = entry.getKey();
@@ -452,7 +440,7 @@ void LTOModule::addPotentialUndefinedSymbol(GlobalValue *decl,
   mangler.getNameWithPrefix(name, decl, false);
 
   StringMap<NameAndAttributes>::value_type &entry =
-    _undefines.GetOrCreateValue(name.c_str());
+    _undefines.GetOrCreateValue(name);
 
   // we already have the symbol
   if (entry.getValue().name)
@@ -469,28 +457,6 @@ void LTOModule::addPotentialUndefinedSymbol(GlobalValue *decl,
   entry.setValue(info);
 }
 
-
-
-// Find external symbols referenced by VALUE. This is a recursive function.
-void LTOModule::findExternalRefs(Value *value, Mangler &mangler) {
-  if (GlobalValue *gv = dyn_cast<GlobalValue>(value)) {
-    if (!gv->hasExternalLinkage())
-      addPotentialUndefinedSymbol(gv, mangler);
-    // If this is a variable definition, do not recursively process
-    // initializer.  It might contain a reference to this variable
-    // and cause an infinite loop.  The initializer will be
-    // processed in addDefinedDataSymbol().
-    return;
-  }
-
-  // GlobalValue, even with InternalLinkage type, may have operands with
-  // ExternalLinkage type. Do not ignore these operands.
-  if (Constant *c = dyn_cast<Constant>(value)) {
-    // Handle ConstantExpr, ConstantStruct, ConstantArry etc.
-    for (unsigned i = 0, e = c->getNumOperands(); i != e; ++i)
-      findExternalRefs(c->getOperand(i), mangler);
-  }
-}
 
 namespace {
   class RecordStreamer : public MCStreamer {
@@ -615,16 +581,15 @@ namespace {
       markDefined(*Symbol);
     }
     virtual void EmitELFSize(MCSymbol *Symbol, const MCExpr *Value) {}
-    virtual void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size) {}
+    virtual void EmitLocalCommonSymbol(MCSymbol *Symbol, uint64_t Size,
+                                       unsigned ByteAlignment) {}
     virtual void EmitTBSSSymbol(const MCSection *Section, MCSymbol *Symbol,
                                 uint64_t Size, unsigned ByteAlignment) {}
     virtual void EmitBytes(StringRef Data, unsigned AddrSpace) {}
     virtual void EmitValueImpl(const MCExpr *Value, unsigned Size,
-                               bool isPCRel, unsigned AddrSpace) {}
-    virtual void EmitULEB128Value(const MCExpr *Value,
-                                  unsigned AddrSpace = 0) {}
-    virtual void EmitSLEB128Value(const MCExpr *Value,
-                                  unsigned AddrSpace = 0) {}
+                               unsigned AddrSpace) {}
+    virtual void EmitULEB128Value(const MCExpr *Value) {}
+    virtual void EmitSLEB128Value(const MCExpr *Value) {}
     virtual void EmitValueToAlignment(unsigned ByteAlignment, int64_t Value,
                                       unsigned ValueSize,
                                       unsigned MaxBytesToEmit) {}
@@ -635,7 +600,8 @@ namespace {
     virtual void EmitFileDirective(StringRef Filename) {}
     virtual void EmitDwarfAdvanceLineAddr(int64_t LineDelta,
                                           const MCSymbol *LastLabel,
-                                        const MCSymbol *Label) {}
+                                          const MCSymbol *Label,
+                                          unsigned PointerSize) {}
 
     virtual void EmitInstruction(const MCInst &Inst) {
       // Scan for values.
@@ -647,18 +613,30 @@ namespace {
   };
 }
 
-bool LTOModule::addAsmGlobalSymbols(MCContext &Context) {
+bool LTOModule::addAsmGlobalSymbols(MCContext &Context, std::string &errMsg) {
   const std::string &inlineAsm = _module->getModuleInlineAsm();
+  if (inlineAsm.empty())
+    return false;
 
   OwningPtr<RecordStreamer> Streamer(new RecordStreamer(Context));
   MemoryBuffer *Buffer = MemoryBuffer::getMemBuffer(inlineAsm);
   SourceMgr SrcMgr;
   SrcMgr.AddNewSourceBuffer(Buffer, SMLoc());
-  OwningPtr<MCAsmParser> Parser(createMCAsmParser(_target->getTarget(), SrcMgr,
+  OwningPtr<MCAsmParser> Parser(createMCAsmParser(SrcMgr,
                                                   Context, *Streamer,
                                                   *_target->getMCAsmInfo()));
-  OwningPtr<TargetAsmParser>
-    TAP(_target->getTarget().createAsmParser(*Parser.get(), *_target.get()));
+  OwningPtr<MCSubtargetInfo> STI(_target->getTarget().
+                      createMCSubtargetInfo(_target->getTargetTriple(),
+                                            _target->getTargetCPU(),
+                                            _target->getTargetFeatureString()));
+  OwningPtr<MCTargetAsmParser>
+    TAP(_target->getTarget().createMCAsmParser(*STI, *Parser.get()));
+  if (!TAP) {
+    errMsg = "target " + std::string(_target->getTarget().getName()) +
+        " does not define AsmParser.";
+    return true;
+  }
+
   Parser->setTargetParser(*TAP);
   int Res = Parser->Run(false);
   if (Res)
@@ -679,14 +657,26 @@ bool LTOModule::addAsmGlobalSymbols(MCContext &Context) {
   return false;
 }
 
-bool LTOModule::ParseSymbols() {
+static bool isDeclaration(const GlobalValue &V) {
+  if (V.hasAvailableExternallyLinkage())
+    return true;
+  if (V.isMaterializable())
+    return false;
+  return V.isDeclaration();
+}
+
+static bool isAliasToDeclaration(const GlobalAlias &V) {
+  return isDeclaration(*V.getAliasedGlobal());
+}
+
+bool LTOModule::ParseSymbols(std::string &errMsg) {
   // Use mangler to add GlobalPrefix to names to match linker names.
-  MCContext Context(*_target->getMCAsmInfo(), NULL);
+  MCContext Context(*_target->getMCAsmInfo(), *_target->getRegisterInfo(),NULL);
   Mangler mangler(Context, *_target->getTargetData());
 
   // add functions
   for (Module::iterator f = _module->begin(); f != _module->end(); ++f) {
-    if (f->isDeclaration())
+    if (isDeclaration(*f))
       addPotentialUndefinedSymbol(f, mangler);
     else
       addDefinedFunctionSymbol(f, mangler);
@@ -695,20 +685,20 @@ bool LTOModule::ParseSymbols() {
   // add data
   for (Module::global_iterator v = _module->global_begin(),
          e = _module->global_end(); v !=  e; ++v) {
-    if (v->isDeclaration())
+    if (isDeclaration(*v))
       addPotentialUndefinedSymbol(v, mangler);
     else
       addDefinedDataSymbol(v, mangler);
   }
 
   // add asm globals
-  if (addAsmGlobalSymbols(Context))
+  if (addAsmGlobalSymbols(Context, errMsg))
     return true;
 
   // add aliases
   for (Module::alias_iterator i = _module->alias_begin(),
          e = _module->alias_end(); i != e; ++i) {
-    if (i->isDeclaration())
+    if (isAliasToDeclaration(*i))
       addPotentialUndefinedSymbol(i, mangler);
     else
       addDefinedDataSymbol(i, mangler);

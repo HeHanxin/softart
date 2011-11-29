@@ -22,6 +22,7 @@
 #include "llvm/CodeGen/LinkAllAsmWriterComponents.h"
 #include "llvm/CodeGen/LinkAllCodegenComponents.h"
 #include "llvm/Config/config.h"
+#include "llvm/MC/SubtargetFeature.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FormattedStream.h"
@@ -31,11 +32,10 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Signals.h"
-#include "llvm/Target/SubtargetFeature.h"
+#include "llvm/Support/TargetRegistry.h"
+#include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetData.h"
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetRegistry.h"
-#include "llvm/Target/TargetSelect.h"
 #include <memory>
 using namespace llvm;
 
@@ -76,6 +76,37 @@ MAttrs("mattr",
   cl::desc("Target specific attributes (-mattr=help for details)"),
   cl::value_desc("a1,+a2,-a3,..."));
 
+static cl::opt<Reloc::Model>
+RelocModel("relocation-model",
+             cl::desc("Choose relocation model"),
+             cl::init(Reloc::Default),
+             cl::values(
+            clEnumValN(Reloc::Default, "default",
+                       "Target default relocation model"),
+            clEnumValN(Reloc::Static, "static",
+                       "Non-relocatable code"),
+            clEnumValN(Reloc::PIC_, "pic",
+                       "Fully relocatable, position independent code"),
+            clEnumValN(Reloc::DynamicNoPIC, "dynamic-no-pic",
+                       "Relocatable external references, non-relocatable code"),
+            clEnumValEnd));
+
+static cl::opt<llvm::CodeModel::Model>
+CMModel("code-model",
+        cl::desc("Choose code model"),
+        cl::init(CodeModel::Default),
+        cl::values(clEnumValN(CodeModel::Default, "default",
+                              "Target default code model"),
+                   clEnumValN(CodeModel::Small, "small",
+                              "Small code model"),
+                   clEnumValN(CodeModel::Kernel, "kernel",
+                              "Kernel code model"),
+                   clEnumValN(CodeModel::Medium, "medium",
+                              "Medium code model"),
+                   clEnumValN(CodeModel::Large, "large",
+                              "Large code model"),
+                   clEnumValEnd));
+
 static cl::opt<bool>
 RelaxAll("mc-relax-all",
   cl::desc("When used with filetype=obj, "
@@ -99,14 +130,12 @@ cl::opt<bool> NoVerify("disable-verify", cl::Hidden,
 cl::opt<bool> DisableDotLoc("disable-dot-loc", cl::Hidden,
                             cl::desc("Do not use .loc entries"));
 
+cl::opt<bool> DisableCFI("disable-cfi", cl::Hidden,
+                         cl::desc("Do not use .cfi_* directives"));
+
 static cl::opt<bool>
 DisableRedZone("disable-red-zone",
   cl::desc("Do not emit code that uses the red zone."),
-  cl::init(false));
-
-static cl::opt<bool>
-NoImplicitFloats("no-implicit-float",
-  cl::desc("Don't generate implicit floating point instructions (x86-only)"),
   cl::init(false));
 
 // GetFileNameRoot - Helper function to get the basename of a filename.
@@ -203,11 +232,15 @@ int main(int argc, char **argv) {
 
   // Initialize targets first, so that --version shows registered targets.
   InitializeAllTargets();
+  InitializeAllTargetMCs();
   InitializeAllAsmPrinters();
   InitializeAllAsmParsers();
 
+  // Register the target printer for --version.
+  cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
+
   cl::ParseCommandLineOptions(argc, argv, "llvm system compiler\n");
-  
+
   // Load the module to be compiled...
   SMDiagnostic Err;
   std::auto_ptr<Module> M;
@@ -263,33 +296,30 @@ int main(int argc, char **argv) {
 
   // Package up features to be passed to target/subtarget
   std::string FeaturesStr;
-  if (MCPU.size() || MAttrs.size()) {
+  if (MAttrs.size()) {
     SubtargetFeatures Features;
-    Features.setCPU(MCPU);
     for (unsigned i = 0; i != MAttrs.size(); ++i)
       Features.AddFeature(MAttrs[i]);
     FeaturesStr = Features.getString();
   }
 
-  std::auto_ptr<TargetMachine> 
-    target(TheTarget->createTargetMachine(TheTriple.getTriple(), FeaturesStr));
+  std::auto_ptr<TargetMachine>
+    target(TheTarget->createTargetMachine(TheTriple.getTriple(),
+                                          MCPU, FeaturesStr,
+                                          RelocModel, CMModel));
   assert(target.get() && "Could not allocate target machine!");
   TargetMachine &Target = *target.get();
 
   if (DisableDotLoc)
     Target.setMCUseLoc(false);
-  if (TheTriple.getOS() == Triple::Darwin) {
-    switch (TheTriple.getDarwinMajorNumber()) {
-    case 7:
-    case 8:
-    case 9:
-      // disable .loc support for older darwin OS.
-      Target.setMCUseLoc(false);
-      break;
-    default:
-      break;
-    }
-  }
+
+  if (DisableCFI)
+    Target.setMCUseCFI(false);
+
+  // Disable .loc support for older OS X versions.
+  if (TheTriple.isMacOSX() &&
+      TheTriple.isMacOSXVersionLT(10, 6))
+    Target.setMCUseLoc(false);
 
   // Figure out where we are going to send the output...
   OwningPtr<tool_output_file> Out
@@ -337,6 +367,9 @@ int main(int argc, char **argv) {
              << " file type!\n";
       return 1;
     }
+
+    // Before executing passes, print the final values of the LLVM options.
+    cl::PrintOptionValues();
 
     PM.run(mod);
   }

@@ -29,6 +29,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetFrameLowering.h"
 #include "llvm/Target/TargetInstrInfo.h"
@@ -54,6 +55,8 @@ INITIALIZE_PASS_END(PEI, "prologepilog",
 
 STATISTIC(NumVirtualFrameRegs, "Number of virtual frame regs encountered");
 STATISTIC(NumScavengedRegs, "Number of frame index regs scavenged");
+STATISTIC(NumBytesStackSpace,
+          "Number of bytes used for stack in all functions");
 
 /// createPrologEpilogCodeInserter - This function returns a pass that inserts
 /// prolog and epilog code, and eliminates abstract frame references.
@@ -145,6 +148,7 @@ void PEI::getAnalysisUsage(AnalysisUsage &AU) const {
 /// pseudo instructions.
 void PEI::calculateCallsInformation(MachineFunction &Fn) {
   const TargetRegisterInfo *RegInfo = Fn.getTarget().getRegisterInfo();
+  const TargetInstrInfo &TII = *Fn.getTarget().getInstrInfo();
   const TargetFrameLowering *TFI = Fn.getTarget().getFrameLowering();
   MachineFrameInfo *MFI = Fn.getFrameInfo();
 
@@ -152,8 +156,8 @@ void PEI::calculateCallsInformation(MachineFunction &Fn) {
   bool AdjustsStack = MFI->adjustsStack();
 
   // Get the function call frame set-up and tear-down instruction opcode
-  int FrameSetupOpcode   = RegInfo->getCallFrameSetupOpcode();
-  int FrameDestroyOpcode = RegInfo->getCallFrameDestroyOpcode();
+  int FrameSetupOpcode   = TII.getCallFrameSetupOpcode();
+  int FrameDestroyOpcode = TII.getCallFrameDestroyOpcode();
 
   // Early exit for targets which have no call frame setup/destroy pseudo
   // instructions.
@@ -337,7 +341,7 @@ void PEI::insertCSRSpillsAndRestores(MachineFunction &Fn) {
         --BeforeI;
 
       // Restore all registers immediately before the return and any
-      // terminators that preceed it.
+      // terminators that precede it.
       if (!TFI->restoreCalleeSavedRegisters(*MBB, I, CSI, TRI)) {
         for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
           unsigned Reg = CSI[i].getReg();
@@ -437,7 +441,7 @@ void PEI::insertCSRSpillsAndRestores(MachineFunction &Fn) {
       --BeforeI;
 
     // Restore all registers immediately before the return and any
-    // terminators that preceed it.
+    // terminators that precede it.
     for (unsigned i = 0, e = blockCSI.size(); i != e; ++i) {
       unsigned Reg = blockCSI[i].getReg();
       const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
@@ -676,7 +680,9 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &Fn) {
   }
 
   // Update frame info to pretend that this is part of the stack...
-  MFI->setStackSize(Offset - LocalAreaOffset);
+  int64_t StackSize = Offset - LocalAreaOffset;
+  MFI->setStackSize(StackSize);
+  NumBytesStackSpace += StackSize;
 }
 
 /// insertPrologEpilogCode - Scan the function for modified callee saved
@@ -695,6 +701,13 @@ void PEI::insertPrologEpilogCode(MachineFunction &Fn) {
     if (!I->empty() && I->back().getDesc().isReturn())
       TFI.emitEpilogue(Fn, *I);
   }
+
+  // Emit additional code that is required to support segmented stacks, if
+  // we've been asked for it.  This, when linked with a runtime with support
+  // for segmented stacks (libgcc is one), will result in allocating stack
+  // space in small chunks instead of one large contiguous block.
+  if (EnableSegmentedStacks)
+    TFI.adjustForSegmentedStacks(Fn);
 }
 
 /// replaceFrameIndices - Replace all MO_FrameIndex operands with physical
@@ -705,12 +718,13 @@ void PEI::replaceFrameIndices(MachineFunction &Fn) {
 
   const TargetMachine &TM = Fn.getTarget();
   assert(TM.getRegisterInfo() && "TM::getRegisterInfo() must be implemented!");
+  const TargetInstrInfo &TII = *Fn.getTarget().getInstrInfo();
   const TargetRegisterInfo &TRI = *TM.getRegisterInfo();
   const TargetFrameLowering *TFI = TM.getFrameLowering();
   bool StackGrowsDown =
     TFI->getStackGrowthDirection() == TargetFrameLowering::StackGrowsDown;
-  int FrameSetupOpcode   = TRI.getCallFrameSetupOpcode();
-  int FrameDestroyOpcode = TRI.getCallFrameDestroyOpcode();
+  int FrameSetupOpcode   = TII.getCallFrameSetupOpcode();
+  int FrameDestroyOpcode = TII.getCallFrameDestroyOpcode();
 
   for (MachineFunction::iterator BB = Fn.begin(),
          E = Fn.end(); BB != E; ++BB) {

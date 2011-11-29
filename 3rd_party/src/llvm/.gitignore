@@ -15,11 +15,14 @@
 *.orig
 # Byte compiled python modules.
 *.pyc
+# vim swap files
+.*.swp
 
 #==============================================================================#
 # Explicit files to ignore (only matches one).
 #==============================================================================#
 .gitusers
+autom4te.cache
 cscope.files
 cscope.out
 autoconf/aclocal.m4

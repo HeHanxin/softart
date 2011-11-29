@@ -16,7 +16,6 @@
 #include "llvm/MC/MCELFSymbolFlags.h"
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/Support/ELF.h"
-#include "llvm/Target/TargetAsmBackend.h"
 
 namespace llvm {
 
@@ -57,13 +56,13 @@ void MCELF::SetVisibility(MCSymbolData &SD, unsigned Visibility) {
   assert(Visibility == ELF::STV_DEFAULT || Visibility == ELF::STV_INTERNAL ||
          Visibility == ELF::STV_HIDDEN || Visibility == ELF::STV_PROTECTED);
 
-  uint32_t OtherFlags = SD.getFlags() & ~(0xf << ELF_STV_Shift);
+  uint32_t OtherFlags = SD.getFlags() & ~(0x3 << ELF_STV_Shift);
   SD.setFlags(OtherFlags | (Visibility << ELF_STV_Shift));
 }
 
 unsigned MCELF::GetVisibility(MCSymbolData &SD) {
   unsigned Visibility =
-    (SD.getFlags() & (0xf << ELF_STV_Shift)) >> ELF_STV_Shift;
+    (SD.getFlags() & (0x3 << ELF_STV_Shift)) >> ELF_STV_Shift;
   assert(Visibility == ELF::STV_DEFAULT || Visibility == ELF::STV_INTERNAL ||
          Visibility == ELF::STV_HIDDEN || Visibility == ELF::STV_PROTECTED);
   return Visibility;

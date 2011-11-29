@@ -26,6 +26,7 @@
 #include "llvm/Target/TargetData.h"
 #include "llvm/Target/TargetLibraryInfo.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/PassNameParser.h"
 #include "llvm/Support/Signals.h"
@@ -34,11 +35,11 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/PluginLoader.h"
 #include "llvm/Support/PrettyStackTrace.h"
-#include "llvm/Support/StandardPasses.h"
 #include "llvm/Support/SystemUtils.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/LinkAllPasses.h"
 #include "llvm/LinkAllVMCore.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include <memory>
 #include <algorithm>
 using namespace llvm;
@@ -132,11 +133,11 @@ static cl::opt<bool>
 AnalyzeOnly("analyze", cl::desc("Only perform analysis, no optimization"));
 
 static cl::opt<bool>
-PrintBreakpoints("print-breakpoints-for-testing", 
+PrintBreakpoints("print-breakpoints-for-testing",
                  cl::desc("Print select breakpoints location for testing"));
 
 static cl::opt<std::string>
-DefaultDataLayout("default-data-layout", 
+DefaultDataLayout("default-data-layout",
           cl::desc("data layout string to use if not specified by module"),
           cl::value_desc("layout-string"), cl::init(""));
 
@@ -327,7 +328,7 @@ struct BasicBlockPassPrinter : public BasicBlockPass {
           << "': Pass " << PassToPrint->getPassName() << ":\n";
 
     // Get and print pass...
-    getAnalysisID<Pass>(PassToPrint->getTypeInfo()).print(Out, 
+    getAnalysisID<Pass>(PassToPrint->getTypeInfo()).print(Out,
             BB.getParent()->getParent());
     return false;
   }
@@ -342,28 +343,43 @@ struct BasicBlockPassPrinter : public BasicBlockPass {
 
 char BasicBlockPassPrinter::ID = 0;
 
-struct BreakpointPrinter : public FunctionPass {
+struct BreakpointPrinter : public ModulePass {
   raw_ostream &Out;
   static char ID;
 
   BreakpointPrinter(raw_ostream &out)
-    : FunctionPass(ID), Out(out) {
+    : ModulePass(ID), Out(out) {
     }
 
-  virtual bool runOnFunction(Function &F) {
-    BasicBlock &EntryBB = F.getEntryBlock();
-    BasicBlock::const_iterator BI = EntryBB.end();
-    --BI;
-    do {
-      const Instruction *In = BI;
-      const DebugLoc DL = In->getDebugLoc();
-      if (!DL.isUnknown()) {
-        DIScope S(DL.getScope(getGlobalContext()));
-        Out << S.getFilename() << " " << DL.getLine() << "\n";
-        break;
+  void getContextName(DIDescriptor Context, std::string &N) {
+    if (Context.isNameSpace()) {
+      DINameSpace NS(Context);
+      if (!NS.getName().empty()) {
+        getContextName(NS.getContext(), N);
+        N = N + NS.getName().str() + "::";
       }
-      --BI;
-    } while (BI != EntryBB.begin());
+    } else if (Context.isType()) {
+      DIType TY(Context);
+      if (!TY.getName().empty()) {
+        getContextName(TY.getContext(), N);
+        N = N + TY.getName().str() + "::";
+      }
+    }
+  }
+
+  virtual bool runOnModule(Module &M) {
+    StringSet<> Processed;
+    if (NamedMDNode *NMD = M.getNamedMetadata("llvm.dbg.sp"))
+      for (unsigned i = 0, e = NMD->getNumOperands(); i != e; ++i) {
+        std::string Name;
+        DISubprogram SP(NMD->getOperand(i));
+        if (SP.Verify())
+          getContextName(SP.getContext(), Name);
+        Name = Name + SP.getDisplayName().str();
+        if (!Name.empty() && Processed.insert(Name)) {
+          Out << Name << "\n";
+        }
+      }
     return false;
   }
 
@@ -371,10 +387,12 @@ struct BreakpointPrinter : public FunctionPass {
     AU.setPreservesAll();
   }
 };
+ 
+} // anonymous namespace
 
 char BreakpointPrinter::ID = 0;
 
-inline void addPass(PassManagerBase &PM, Pass *P) {
+static inline void addPass(PassManagerBase &PM, Pass *P) {
   // Add the pass to the pass manager...
   PM.add(P);
 
@@ -387,54 +405,48 @@ inline void addPass(PassManagerBase &PM, Pass *P) {
 /// duplicates llvm-gcc behaviour.
 ///
 /// OptLevel - Optimization Level
-void AddOptimizationPasses(PassManagerBase &MPM, PassManagerBase &FPM,
-                           unsigned OptLevel) {
-  createStandardFunctionPasses(&FPM, OptLevel);
+static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
+                                  unsigned OptLevel) {
+  PassManagerBuilder Builder;
+  Builder.OptLevel = OptLevel;
 
-  llvm::Pass *InliningPass = 0;
   if (DisableInline) {
     // No inlining pass
-  } else if (OptLevel) {
+  } else if (OptLevel > 1) {
     unsigned Threshold = 225;
     if (OptLevel > 2)
       Threshold = 275;
-    InliningPass = createFunctionInliningPass(Threshold);
+    Builder.Inliner = createFunctionInliningPass(Threshold);
   } else {
-    InliningPass = createAlwaysInlinerPass();
+    Builder.Inliner = createAlwaysInlinerPass();
   }
-  createStandardModulePasses(&MPM, OptLevel,
-                             /*OptimizeSize=*/ false,
-                             UnitAtATime,
-                             /*UnrollLoops=*/ OptLevel > 1,
-                             !DisableSimplifyLibCalls,
-                             /*HaveExceptions=*/ true,
-                             InliningPass);
+  Builder.DisableUnitAtATime = !UnitAtATime;
+  Builder.DisableUnrollLoops = OptLevel == 0;
+  Builder.DisableSimplifyLibCalls = DisableSimplifyLibCalls;
+  
+  Builder.populateFunctionPassManager(FPM);
+  Builder.populateModulePassManager(MPM);
 }
 
-void AddStandardCompilePasses(PassManagerBase &PM) {
+static void AddStandardCompilePasses(PassManagerBase &PM) {
   PM.add(createVerifierPass());                  // Verify that input is correct
-
-  addPass(PM, createLowerSetJmpPass());          // Lower llvm.setjmp/.longjmp
 
   // If the -strip-debug command line option was specified, do it.
   if (StripDebug)
     addPass(PM, createStripSymbolsPass(true));
 
   if (DisableOptimizations) return;
-
-  llvm::Pass *InliningPass = !DisableInline ? createFunctionInliningPass() : 0;
 
   // -std-compile-opts adds the same module passes as -O3.
-  createStandardModulePasses(&PM, 3,
-                             /*OptimizeSize=*/ false,
-                             /*UnitAtATime=*/ true,
-                             /*UnrollLoops=*/ true,
-                             !DisableSimplifyLibCalls,
-                             /*HaveExceptions=*/ true,
-                             InliningPass);
+  PassManagerBuilder Builder;
+  if (!DisableInline)
+    Builder.Inliner = createFunctionInliningPass();
+  Builder.OptLevel = 3;
+  Builder.DisableSimplifyLibCalls = DisableSimplifyLibCalls;
+  Builder.populateModulePassManager(PM);
 }
 
-void AddStandardLinkPasses(PassManagerBase &PM) {
+static void AddStandardLinkPasses(PassManagerBase &PM) {
   PM.add(createVerifierPass());                  // Verify that input is correct
 
   // If the -strip-debug command line option was specified, do it.
@@ -443,12 +455,10 @@ void AddStandardLinkPasses(PassManagerBase &PM) {
 
   if (DisableOptimizations) return;
 
-  createStandardLTOPasses(&PM, /*Internalize=*/ !DisableInternalize,
-                          /*RunInliner=*/ !DisableInline,
-                          /*VerifyEach=*/ VerifyEach);
+  PassManagerBuilder Builder;
+  Builder.populateLTOPassManager(PM, /*Internalize=*/ !DisableInternalize,
+                                 /*RunInliner=*/ !DisableInline);
 }
-
-} // anonymous namespace
 
 
 //===----------------------------------------------------------------------===//
@@ -463,7 +473,7 @@ int main(int argc, char **argv) {
 
   llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
   LLVMContext &Context = getGlobalContext();
-  
+
   // Initialize passes
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
   initializeCore(Registry);
@@ -475,7 +485,7 @@ int main(int argc, char **argv) {
   initializeInstCombine(Registry);
   initializeInstrumentation(Registry);
   initializeTarget(Registry);
-  
+
   cl::ParseCommandLineOptions(argc, argv,
     "llvm .bc -> .bc modular optimizer and analysis printer\n");
 
@@ -533,12 +543,12 @@ int main(int argc, char **argv) {
 
   // Add an appropriate TargetLibraryInfo pass for the module's triple.
   TargetLibraryInfo *TLI = new TargetLibraryInfo(Triple(M->getTargetTriple()));
-  
+
   // The -disable-simplify-libcalls flag actually disables all builtin optzns.
   if (DisableSimplifyLibCalls)
     TLI->disableAllFunctions();
   Passes.add(TLI);
-  
+
   // Add an appropriate TargetData instance for this module.
   TargetData *TD = 0;
   const std::string &ModuleDataLayout = M.get()->getDataLayout();
@@ -550,9 +560,9 @@ int main(int argc, char **argv) {
   if (TD)
     Passes.add(TD);
 
-  OwningPtr<PassManager> FPasses;
+  OwningPtr<FunctionPassManager> FPasses;
   if (OptLevelO1 || OptLevelO2 || OptLevelO3) {
-    FPasses.reset(new PassManager());
+    FPasses.reset(new FunctionPassManager(M.get()));
     if (TD)
       FPasses->add(new TargetData(*TD));
   }
@@ -562,7 +572,7 @@ int main(int argc, char **argv) {
     if (!Out) {
       if (OutputFilename.empty())
         OutputFilename = "-";
-      
+
       std::string ErrorInfo;
       Out.reset(new tool_output_file(OutputFilename.c_str(), ErrorInfo,
                                      raw_fd_ostream::F_Binary));
@@ -670,8 +680,12 @@ int main(int argc, char **argv) {
   if (OptLevelO3)
     AddOptimizationPasses(Passes, *FPasses, 3);
 
-  if (OptLevelO1 || OptLevelO2 || OptLevelO3)
-    FPasses->run(*M.get());
+  if (OptLevelO1 || OptLevelO2 || OptLevelO3) {
+    FPasses->doInitialization();
+    for (Module::iterator F = M->begin(), E = M->end(); F != E; ++F)
+      FPasses->run(*F);
+    FPasses->doFinalization();
+  }
 
   // Check that the module is well formed on completion of optimization
   if (!NoVerify && !VerifyEach)
@@ -684,6 +698,9 @@ int main(int argc, char **argv) {
     else
       Passes.add(createBitcodeWriterPass(Out->os()));
   }
+
+  // Before executing passes, print the final values of the LLVM options.
+  cl::PrintOptionValues();
 
   // Now that we have all of the passes ready, run them.
   Passes.run(*M.get());

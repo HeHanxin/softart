@@ -10,7 +10,7 @@ set(CMAKE_MODULE_PATH
   "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules"
   )
 
-set(PACKAGE_VERSION "2.9")
+set(PACKAGE_VERSION "3.0")
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
@@ -80,6 +80,9 @@ set(LLVM_ALL_TARGETS
   X86
   XCore
   )
+
+# List of targets with JIT support:
+set(LLVM_TARGETS_WITH_JIT X86 PowerPC ARM Mips)
 
 if( MSVC )
   set(LLVM_TARGETS_TO_BUILD X86
@@ -198,20 +201,15 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 include_directories( ${LLVM_BINARY_DIR}/include ${LLVM_MAIN_INCLUDE_DIR})
 
 if( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
-   SET(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-include llvm/Support/Solaris.h")
+   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -include llvm/Support/Solaris.h")
 endif( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
 
 include(AddLLVM)
 include(TableGen)
 
-if( MINGW )
-  get_system_libs(LLVM_SYSTEM_LIBS_LIST)
-  foreach(l ${LLVM_SYSTEM_LIBS_LIST})
-    set(LLVM_SYSTEM_LIBS "${LLVM_SYSTEM_LIBS} -l${l}")
-  endforeach()
-  set(CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES}${LLVM_SYSTEM_LIBS}")
-  set(CMAKE_C_STANDARD_LIBRARIES "${CMAKE_C_STANDARD_LIBRARIES}${LLVM_SYSTEM_LIBS}")
-endif()
+macro(llvm_tablegen)
+  tablegen(LLVM ${ARGN})
+endmacro()
 
 if( MINGW )
   # People report that -O3 is unreliable on MinGW. The traditional
@@ -221,18 +219,9 @@ endif()
 
 # Put this before tblgen. Else we have a circular dependence.
 add_subdirectory(lib/Support)
-
-set(LLVM_TABLEGEN "tblgen" CACHE
-  STRING "Native TableGen executable. Saves building one when cross-compiling.")
-# Effective tblgen executable to be used:
-set(LLVM_TABLEGEN_EXE ${LLVM_TABLEGEN})
+add_subdirectory(lib/TableGen)
 
 add_subdirectory(utils/TableGen)
-
-if( CMAKE_CROSSCOMPILING )
-  # This adds a dependency on target `tblgen', so must go after utils/TableGen
-  include( CrossCompileLLVM )
-endif( CMAKE_CROSSCOMPILING )
 
 add_subdirectory(include/llvm)
 
@@ -253,6 +242,13 @@ if( LLVM_INCLUDE_TOOLS )
   add_subdirectory(tools)
 endif()
 
+option(LLVM_BUILD_RUNTIME
+  "Build the LLVM runtime libraries. If OFF, just generate build targets." ON)
+option(LLVM_INCLUDE_RUNTIME "Generate build targets for the LLVM runtimes" ON)
+if( LLVM_INCLUDE_RUNTIME )
+  add_subdirectory(runtime)
+endif()
+
 option(LLVM_BUILD_EXAMPLES
   "Build the LLVM example programs. If OFF, just generate build targets." OFF)
 option(LLVM_INCLUDE_EXAMPLES "Generate build targets for the LLVM examples" ON)
@@ -261,7 +257,7 @@ if( LLVM_INCLUDE_EXAMPLES )
 endif()
 
 option(LLVM_BUILD_TESTS
-  "Build LLVM unit tests. If OFF, just generate build targes." OFF)
+  "Build LLVM unit tests. If OFF, just generate build targets." OFF)
 if( LLVM_INCLUDE_TESTS )
   add_subdirectory(test)
   add_subdirectory(utils/unittest)

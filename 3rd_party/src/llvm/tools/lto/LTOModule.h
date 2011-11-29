@@ -52,7 +52,12 @@ struct LTOModule {
     static LTOModule*        makeLTOModule(const char* path,
                                           std::string& errMsg);
     static LTOModule*        makeLTOModule(int fd, const char *path,
-                                           off_t size,
+                                           size_t size,
+                                           std::string& errMsg);
+    static LTOModule*        makeLTOModule(int fd, const char *path,
+                                           size_t file_size,
+                                           size_t map_size,
+                                           off_t offset,
                                            std::string& errMsg);
     static LTOModule*        makeLTOModule(const void* mem, size_t length,
                                            std::string& errMsg);
@@ -71,19 +76,18 @@ struct LTOModule {
 private:
                             LTOModule(llvm::Module* m, llvm::TargetMachine* t);
 
-    bool                    ParseSymbols();
+    bool                    ParseSymbols(std::string &errMsg);
     void                    addDefinedSymbol(llvm::GlobalValue* def, 
                                                     llvm::Mangler& mangler, 
                                                     bool isFunction);
     void                    addPotentialUndefinedSymbol(llvm::GlobalValue* decl, 
                                                         llvm::Mangler &mangler);
-    void                    findExternalRefs(llvm::Value* value, 
-                                                llvm::Mangler& mangler);
     void                    addDefinedFunctionSymbol(llvm::Function* f, 
                                                         llvm::Mangler &mangler);
     void                    addDefinedDataSymbol(llvm::GlobalValue* v, 
                                                         llvm::Mangler &mangler);
-    bool                    addAsmGlobalSymbols(llvm::MCContext &Context);
+    bool                    addAsmGlobalSymbols(llvm::MCContext &Context,
+                                                std::string &errMsg);
     void                    addAsmGlobalSymbol(const char *,
                                                lto_symbol_attributes scope);
     void                    addAsmGlobalSymbolUndef(const char *);
