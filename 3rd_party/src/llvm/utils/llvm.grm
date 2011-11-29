@@ -172,6 +172,8 @@ FuncAttr      ::= noreturn
  | optsize
  | ssp
  | sspreq
+ | returns_twice
+ | nonlazybind
  ;
 
 OptFuncAttrs  ::= + _ | OptFuncAttrs FuncAttr ;

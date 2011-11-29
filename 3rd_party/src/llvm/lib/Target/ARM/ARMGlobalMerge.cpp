@@ -53,7 +53,6 @@
 
 #define DEBUG_TYPE "arm-global-merge"
 #include "ARM.h"
-#include "ARMTargetMachine.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/Attributes.h"
 #include "llvm/Constants.h"
@@ -101,8 +100,8 @@ namespace {
       GlobalCmp(const TargetData *td) : TD(td) { }
 
       bool operator()(const GlobalVariable *GV1, const GlobalVariable *GV2) {
-        const Type *Ty1 = cast<PointerType>(GV1->getType())->getElementType();
-        const Type *Ty2 = cast<PointerType>(GV2->getType())->getElementType();
+        Type *Ty1 = cast<PointerType>(GV1->getType())->getElementType();
+        Type *Ty2 = cast<PointerType>(GV2->getType())->getElementType();
 
         return (TD->getTypeAllocSize(Ty1) < TD->getTypeAllocSize(Ty2));
       }
@@ -124,15 +123,15 @@ bool ARMGlobalMerge::doMerge(SmallVectorImpl<GlobalVariable*> &Globals,
   // FIXME: Find better heuristics
   std::stable_sort(Globals.begin(), Globals.end(), GlobalCmp(TD));
 
-  const Type *Int32Ty = Type::getInt32Ty(M.getContext());
+  Type *Int32Ty = Type::getInt32Ty(M.getContext());
 
   for (size_t i = 0, e = Globals.size(); i != e; ) {
     size_t j = 0;
     uint64_t MergedSize = 0;
-    std::vector<const Type*> Tys;
+    std::vector<Type*> Tys;
     std::vector<Constant*> Inits;
     for (j = i; j != e; ++j) {
-      const Type *Ty = Globals[j]->getType()->getElementType();
+      Type *Ty = Globals[j]->getType()->getElementType();
       MergedSize += TD->getTypeAllocSize(Ty);
       if (MergedSize > MaxOffset) {
         break;
@@ -151,7 +150,7 @@ bool ARMGlobalMerge::doMerge(SmallVectorImpl<GlobalVariable*> &Globals,
         ConstantInt::get(Int32Ty, 0),
         ConstantInt::get(Int32Ty, k-i)
       };
-      Constant *GEP = ConstantExpr::getInBoundsGetElementPtr(MergedGV, Idx, 2);
+      Constant *GEP = ConstantExpr::getInBoundsGetElementPtr(MergedGV, Idx);
       Globals[k]->replaceAllUsesWith(GEP);
       Globals[k]->eraseFromParent();
     }
@@ -168,11 +167,6 @@ bool ARMGlobalMerge::doInitialization(Module &M) {
   unsigned MaxOffset = TLI->getMaximalGlobalOffset();
   bool Changed = false;
 
-  // Disable this pass on darwin. The debugger is not yet ready to extract
-  // variable's  info from a merged global.
-  if (TLI->getTargetMachine().getSubtarget<ARMSubtarget>().isTargetDarwin())
-    return false;
-
   // Grab all non-const globals.
   for (Module::global_iterator I = M.global_begin(),
          E = M.global_end(); I != E; ++I) {
@@ -181,7 +175,9 @@ bool ARMGlobalMerge::doInitialization(Module &M) {
       continue;
 
     // Ignore fancy-aligned globals for now.
-    if (I->getAlignment() != 0)
+    unsigned Alignment = I->getAlignment();
+    Type *Ty = I->getType()->getElementType();
+    if (Alignment > TD->getABITypeAlignment(Ty))
       continue;
 
     // Ignore all 'special' globals.
@@ -189,7 +185,7 @@ bool ARMGlobalMerge::doInitialization(Module &M) {
         I->getName().startswith(".llvm."))
       continue;
 
-    if (TD->getTypeAllocSize(I->getType()->getElementType()) < MaxOffset) {
+    if (TD->getTypeAllocSize(Ty) < MaxOffset) {
       const TargetLoweringObjectFile &TLOF = TLI->getObjFileLowering();
       if (TLOF.getKindForGlobal(I, TLI->getTargetMachine()).isBSSLocal())
         BSSGlobals.push_back(I);

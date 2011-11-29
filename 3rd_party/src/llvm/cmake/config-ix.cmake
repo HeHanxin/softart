@@ -198,11 +198,6 @@ if( LLVM_USING_GLIBC )
   add_llvm_definitions( -D_GNU_SOURCE )
 endif()
 
-# Type checks
-check_type_exists(std::bidirectional_iterator<int,int> "iterator;iostream" HAVE_BI_ITERATOR)
-check_type_exists(std::iterator<int,int,int> iterator HAVE_STD_ITERATOR)
-check_type_exists(std::forward_iterator<int,int> iterator HAVE_FWD_ITERATOR)
-
 set(headers "")
 if (HAVE_SYS_TYPES_H)
   set(headers ${headers} "sys/types.h")
@@ -271,9 +266,13 @@ if( LLVM_ENABLE_FFI )
   check_symbol_exists(ffi_call ${FFI_HEADER} HAVE_FFI_CALL)
   list(REMOVE_ITEM CMAKE_REQUIRED_INCLUDES ${FFI_INCLUDE_PATH})
   list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES ${FFI_LIBRARY_PATH})
+else()
+  unset(HAVE_FFI_FFI_H CACHE)
+  unset(HAVE_FFI_H CACHE)
+  unset(HAVE_FFI_CALL CACHE)
 endif( LLVM_ENABLE_FFI )
 
-# Define LLVM_MULTITHREADED if gcc atomic builtins exists.
+# Define LLVM_HAS_ATOMICS if gcc or MSVC atomic builtins are supported.
 include(CheckAtomic)
 
 if( LLVM_ENABLE_PIC )
@@ -321,24 +320,20 @@ elseif (LLVM_NATIVE_ARCH MATCHES "xcore")
 elseif (LLVM_NATIVE_ARCH MATCHES "msp430")
   set(LLVM_NATIVE_ARCH MSP430)
 else ()
-  message(STATUS
-    "Unknown architecture ${LLVM_NATIVE_ARCH}; lli will not JIT code")
-  set(LLVM_NATIVE_ARCH)
+  message(FATAL_ERROR "Unknown architecture ${LLVM_NATIVE_ARCH}")
 endif ()
 
-if (LLVM_NATIVE_ARCH)
-  list(FIND LLVM_TARGETS_TO_BUILD ${LLVM_NATIVE_ARCH} NATIVE_ARCH_IDX)
-  if (NATIVE_ARCH_IDX EQUAL -1)
-    message(STATUS
-      "Native target ${LLVM_NATIVE_ARCH} is not selected; lli will not JIT code")
-    set(LLVM_NATIVE_ARCH)
-  else ()
-    message(STATUS "Native target architecture is ${LLVM_NATIVE_ARCH}")
-    set(LLVM_NATIVE_TARGET LLVMInitialize${LLVM_NATIVE_ARCH}Target)
-    set(LLVM_NATIVE_TARGETINFO LLVMInitialize${LLVM_NATIVE_ARCH}TargetInfo)
-    set(LLVM_NATIVE_ASMPRINTER LLVMInitialize${LLVM_NATIVE_ARCH}AsmPrinter)
-  endif ()
-endif()
+list(FIND LLVM_TARGETS_TO_BUILD ${LLVM_NATIVE_ARCH} NATIVE_ARCH_IDX)
+if (NATIVE_ARCH_IDX EQUAL -1)
+  message(STATUS
+    "Native target ${LLVM_NATIVE_ARCH} is not selected; lli will not JIT code")
+else ()
+  message(STATUS "Native target architecture is ${LLVM_NATIVE_ARCH}")
+  set(LLVM_NATIVE_TARGET LLVMInitialize${LLVM_NATIVE_ARCH}Target)
+  set(LLVM_NATIVE_TARGETINFO LLVMInitialize${LLVM_NATIVE_ARCH}TargetInfo)
+  set(LLVM_NATIVE_TARGETMC LLVMInitialize${LLVM_NATIVE_ARCH}TargetMC)
+  set(LLVM_NATIVE_ASMPRINTER LLVMInitialize${LLVM_NATIVE_ARCH}AsmPrinter)
+endif ()
 
 if( MINGW )
   set(HAVE_LIBIMAGEHLP 1)
@@ -350,7 +345,6 @@ endif( MINGW )
 
 if( MSVC )
   set(error_t int)
-  set(mode_t "unsigned short")
   set(LTDL_SHLIBPATH_VAR "PATH")
   set(LTDL_SYSSEARCHPATH "")
   set(LTDL_DLOPEN_DEPLIBS 1)
@@ -366,6 +360,21 @@ else( MSVC )
   set(LTDL_SYSSEARCHPATH "") # TODO
   set(LTDL_DLOPEN_DEPLIBS 0)  # TODO
 endif( MSVC )
+
+if( PURE_WINDOWS )
+  CHECK_CXX_SOURCE_COMPILES("
+    #include <windows.h>
+    #include <imagehlp.h>
+    extern \"C\" void foo(PENUMLOADED_MODULES_CALLBACK);
+    extern \"C\" void foo(BOOL(CALLBACK*)(PCSTR,ULONG_PTR,ULONG,PVOID));
+    int main(){return 0;}"
+    HAVE_ELMCB_PCSTR)
+  if( HAVE_ELMCB_PCSTR )
+    set(WIN32_ELMCB_PCSTR "PCSTR")
+  else()
+    set(WIN32_ELMCB_PCSTR "PSTR")
+  endif()
+endif( PURE_WINDOWS )
 
 # FIXME: Signal handler return type, currently hardcoded to 'void'
 set(RETSIGTYPE void)
