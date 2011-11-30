@@ -18,6 +18,7 @@
 #include "llvm/Support/DataTypes.h"
 #include <cstddef>
 #include <limits>
+#include <cstdlib>
 
 namespace llvm {
 namespace sys {
