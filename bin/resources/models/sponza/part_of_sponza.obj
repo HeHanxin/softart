@@ -1,7 +1,7 @@
 # 3ds Max Wavefront OBJ Exporter v0.97b - (c)2007 guruware
 # 创建的文件:20.02.2012 18:25:03
 
-mtllib SponzaSimple.mtl
+mtllib part_of_sponza.mtl
 
 #
 # object sponza_18
