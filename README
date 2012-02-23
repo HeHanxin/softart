@@ -1,0 +1,10 @@
+ALL-IN-ONE build:
+	If project.py is existed
+		Run build_all.py
+	otherwise
+		Run build_all.py to generate project.py
+		Modify project.py
+		Run build_all.py
+		
+Manual build:
+	see doc/HowToBuildSalviaManual.txt
