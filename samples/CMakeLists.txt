@@ -1,0 +1,13 @@
+option( SALVIA_ENABLE_SAMPLES "Build samples." TRUE )
+
+include ( ConfigureSample.cmake )
+
+if( SALVIA_ENABLE_SAMPLES )
+	ADD_SUBDIRECTORY( ComplexMesh )
+	ADD_SUBDIRECTORY( TextureAndBlending )
+	ADD_SUBDIRECTORY( ColorizedTriangle )
+	ADD_SUBDIRECTORY( ObjLoader )
+	ADD_SUBDIRECTORY( Sponza )
+	ADD_SUBDIRECTORY( PartOfSponza )
+	ADD_SUBDIRECTORY( Triangles )
+endif()
