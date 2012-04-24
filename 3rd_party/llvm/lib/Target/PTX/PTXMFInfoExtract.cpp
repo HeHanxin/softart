@@ -22,9 +22,11 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
+using namespace llvm;
+
 // NOTE: PTXMFInfoExtract must after register allocation!
 
-namespace llvm {
+namespace {
   /// PTXMFInfoExtract - PTX specific code to extract of PTX machine
   /// function information for PTXAsmPrinter
   ///
@@ -42,7 +44,7 @@ namespace llvm {
         return "PTX Machine Function Info Extractor";
       }
   }; // class PTXMFInfoExtract
-} // namespace llvm
+} // end anonymous namespace
 
 using namespace llvm;
 
@@ -56,7 +58,22 @@ bool PTXMFInfoExtract::runOnMachineFunction(MachineFunction &MF) {
   for (unsigned i = 0; i < MRI.getNumVirtRegs(); ++i) {
     unsigned Reg = TargetRegisterInfo::index2VirtReg(i);
     const TargetRegisterClass *TRC = MRI.getRegClass(Reg);
-    MFI->addVirtualRegister(TRC, Reg);
+    unsigned RegType;
+    if (TRC == &PTX::RegPredRegClass)
+      RegType = PTXRegisterType::Pred;
+    else if (TRC == &PTX::RegI16RegClass)
+      RegType = PTXRegisterType::B16;
+    else if (TRC == &PTX::RegI32RegClass)
+      RegType = PTXRegisterType::B32;
+    else if (TRC == &PTX::RegI64RegClass)
+      RegType = PTXRegisterType::B64;
+    else if (TRC == &PTX::RegF32RegClass)
+      RegType = PTXRegisterType::F32;
+    else if (TRC == &PTX::RegF64RegClass)
+      RegType = PTXRegisterType::F64;
+    else
+      llvm_unreachable("Unkown register class.");
+    MFI->addRegister(Reg, RegType, PTXRegisterSpace::Reg);
   }
 
   return false;

@@ -21,7 +21,6 @@
 #include "llvm/TableGen/Error.h"
 #include "llvm/TableGen/Record.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/VectorExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 using namespace llvm;
@@ -280,7 +279,7 @@ struct OperandsSignature {
       } else if (Operands[i].isImm()) {
         OS << "uint64_t imm" << i;
       } else if (Operands[i].isFP()) {
-        OS << "ConstantFP *f" << i;
+        OS << "const ConstantFP *f" << i;
       } else {
         llvm_unreachable("Unknown operand kind!");
       }
@@ -640,7 +639,7 @@ void FastISelMap::printFunctionDefinitions(raw_ostream &OS) {
                 Operands.PrintManglingSuffix(OS, *Memo.PhysRegs,
                                              ImmediatePredicates, true);
                 OS << "(" << InstNS << Memo.Name << ", ";
-                OS << InstNS << Memo.RC->getName() << "RegisterClass";
+                OS << "&" << InstNS << Memo.RC->getName() << "RegClass";
                 if (!Operands.empty())
                   OS << ", ";
                 Operands.PrintArguments(OS, *Memo.PhysRegs);
@@ -732,7 +731,7 @@ void FastISelMap::printFunctionDefinitions(raw_ostream &OS) {
               Operands.PrintManglingSuffix(OS, *Memo.PhysRegs,
                                            ImmediatePredicates, true);
               OS << "(" << InstNS << Memo.Name << ", ";
-              OS << InstNS << Memo.RC->getName() << "RegisterClass";
+              OS << "&" << InstNS << Memo.RC->getName() << "RegClass";
               if (!Operands.empty())
                 OS << ", ";
               Operands.PrintArguments(OS, *Memo.PhysRegs);
