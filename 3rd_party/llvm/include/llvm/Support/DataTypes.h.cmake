@@ -95,23 +95,26 @@ typedef u_int64_t uint64_t;
 #else /* _MSC_VER */
 #	if defined( __cplusplus ) && defined(HAVE_BOOST_SYS_TYPES) && HAVE_BOOST_SYS_TYPES
 
-#		include <boost/cstdint.hpp>
-		using boost::int8_t;
-		using boost::int16_t;
-		using boost::int32_t;
-		using boost::int64_t;
+#	include <boost/cstdint.hpp>
+	using boost::int8_t;
+	using boost::int16_t;
+	using boost::int32_t;
+	using boost::int64_t;
 
-		using boost::uint8_t;
-		using boost::uint16_t;
-		using boost::uint32_t;
-		using boost::uint64_t;
+	using boost::uint8_t;
+	using boost::uint16_t;
+	using boost::uint32_t;
+	using boost::uint64_t;
 
-		typedef boost::int32_t ssize_t;
+	typedef boost::int32_t ssize_t;
 
-#	elif _MSC_VER < 1600
+#	endif
 
 /* Visual C++ doesn't provide standard integer headers, but it does provide
    built-in data types. */
+#ifdef HAVE_STDINT_H
+#include <stdint.h>
+#endif
 #include <stdlib.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -129,11 +132,6 @@ typedef unsigned short uint16_t;
 typedef signed char int8_t;
 typedef unsigned char uint8_t;
 typedef signed int ssize_t;
-#	else /* MSVC 2010 */
-#		include <stdint.h>
-#	endif	// MSVC and Boost
-
-	// Definitions for constants in VS.
 #ifndef INT8_MAX
 # define INT8_MAX 127
 #endif
@@ -162,7 +160,6 @@ typedef signed int ssize_t;
 #ifndef UINT32_MAX
 # define UINT32_MAX 4294967295U
 #endif
-
 /* Certain compatibility updates to VC++ introduce the `cstdint'
  * header, which defines the INT*_C macros. On default installs they
  * are absent. */
@@ -191,8 +188,23 @@ typedef signed int ssize_t;
 # define UINT64_C(C) C##ui64
 #endif
 
+#ifndef PRId64
+# define PRId64 "I64d"
+#endif
+#ifndef PRIi64
+# define PRIi64 "I64i"
+#endif
+#ifndef PRIo64
+# define PRIo64 "I64o"
+#endif
+#ifndef PRIu64
+# define PRIu64 "I64u"
+#endif
 #ifndef PRIx64
 # define PRIx64 "I64x"
+#endif
+#ifndef PRIX64
+# define PRIX64 "I64X"
 #endif
 
 #endif /* _MSC_VER */
