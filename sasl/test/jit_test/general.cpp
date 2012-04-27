@@ -1,4 +1,4 @@
-#define ALL_TESTS_ENABLED 0
+#define ALL_TESTS_ENABLED 1
 
 #include <eflib/include/platform/boost_begin.h>
 #include <boost/test/unit_test.hpp>
@@ -1503,6 +1503,9 @@ BOOST_FIXTURE_TEST_CASE( local_var, jit_fixture ){
 }
 #endif
 
+typedef matrix_<float, 4, 3> float3x4;
+typedef matrix_<float, 4, 3> float3x4;
+
 #if 1 || ALL_TESTS_ENABLED
 BOOST_FIXTURE_TEST_CASE( arith_ops, jit_fixture )
 {
@@ -1515,6 +1518,10 @@ BOOST_FIXTURE_TEST_CASE( arith_ops, jit_fixture )
 	jit_function<int3(int3)> test_int_arith;
 	function( test_int_arith, "test_int_arith" );
 	BOOST_REQUIRE(test_int_arith);
+
+	jit_function<float3x4 (float3x4, float3x4)> test_mat_arith;
+	function(test_mat_arith, "test_mat_arith");
+	BOOST_REQUIRE(test_mat_arith);
 
 	vec4 vf( 76.8f, -88.5f, 37.7f, -98.1f );
 	int3 vi( 87, 46, 22 );
@@ -1533,6 +1540,46 @@ BOOST_FIXTURE_TEST_CASE( arith_ops, jit_fixture )
 	BOOST_CHECK_EQUAL( ref_i[0], ret_i[0] );
 	BOOST_CHECK_EQUAL( ref_i[1], ret_i[1] );
 	BOOST_CHECK_EQUAL( ref_i[2], ret_i[2] );
+
+	{
+		float lhs_array[3][4] =
+		{
+			{17.7f, 66.3f, 0.92f, -88.7f},
+			{8.6f, -0.22f, 17.1f, -64.4f},
+			{199.8f, 0.1f, -0.1f, 99.73f}
+		};
+
+		float rhs_array[3][4] =
+		{
+			{9.62f, 10.33f, -18.2f, 99.7f},
+			{-0.3f, -76.9f, 93.3f,  0.22f},
+			{44.1f, 0.027f, 19.9f, -33.5f}
+		};
+
+		float ref_v[3][4] = {0};
+
+		for( int i = 0; i < 3; ++i )
+		{
+			for( int j = 0; j < 4; ++j )
+			{
+				ref_v[i][j] 
+				= (lhs_array[i][j] + rhs_array[i][j]) * lhs_array[i][j]
+				- fmodf( (rhs_array[i][j] / lhs_array[i][j]), rhs_array[i][j] );
+			}
+		}
+
+		float3x4& lhs( reinterpret_cast<float3x4&>(lhs_array) );
+		float3x4& rhs( reinterpret_cast<float3x4&>(rhs_array) );
+		float3x4 ret = test_mat_arith( lhs, rhs );
+
+		for( int i = 0; i < 3; ++i )
+		{
+			for( int j = 0; j < 4; ++j )
+			{
+				BOOST_CHECK_CLOSE( ref_v[i][j], ret.data_[i][j], 0.000012f );
+			}
+		}
+	}
 }
 #endif
 
