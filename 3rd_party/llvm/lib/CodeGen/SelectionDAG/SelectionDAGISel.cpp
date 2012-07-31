@@ -14,12 +14,8 @@
 #define DEBUG_TYPE "isel"
 #include "ScheduleDAGSDNodes.h"
 #include "SelectionDAGBuilder.h"
-#include "llvm/CodeGen/FunctionLoweringInfo.h"
-#include "llvm/CodeGen/SelectionDAGISel.h"
-#include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/BranchProbabilityInfo.h"
-#include "llvm/Analysis/DebugInfo.h"
 #include "llvm/Constants.h"
+#include "llvm/DebugInfo.h"
 #include "llvm/Function.h"
 #include "llvm/InlineAsm.h"
 #include "llvm/Instructions.h"
@@ -27,7 +23,10 @@
 #include "llvm/IntrinsicInst.h"
 #include "llvm/LLVMContext.h"
 #include "llvm/Module.h"
+#include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/CodeGen/FastISel.h"
+#include "llvm/CodeGen/FunctionLoweringInfo.h"
 #include "llvm/CodeGen/GCStrategy.h"
 #include "llvm/CodeGen/GCMetadata.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -38,6 +37,7 @@
 #include "llvm/CodeGen/ScheduleHazardRecognizer.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
 #include "llvm/Target/TargetInstrInfo.h"
@@ -449,9 +449,9 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
         }
       }
     }
-  done:;
   }
 
+  done:
   // Determine if there is a call to setjmp in the machine function.
   MF->setExposesReturnsTwice(Fn.callsFunctionThatReturnsTwice());
 
@@ -466,8 +466,7 @@ bool SelectionDAGISel::runOnMachineFunction(MachineFunction &mf) {
     // If To is also scheduled to be replaced, find what its ultimate
     // replacement is.
     for (;;) {
-      DenseMap<unsigned, unsigned>::iterator J =
-        FuncInfo->RegFixups.find(To);
+      DenseMap<unsigned, unsigned>::iterator J = FuncInfo->RegFixups.find(To);
       if (J == E) break;
       To = J->second;
     }
@@ -1776,7 +1775,7 @@ enum ChainResult {
 /// The walk we do here is guaranteed to be small because we quickly get down to
 /// already selected nodes "below" us.
 static ChainResult
-WalkChainUsers(SDNode *ChainedNode,
+WalkChainUsers(const SDNode *ChainedNode,
                SmallVectorImpl<SDNode*> &ChainedNodesInPattern,
                SmallVectorImpl<SDNode*> &InteriorChainedNodes) {
   ChainResult Result = CR_Simple;
@@ -2009,14 +2008,14 @@ CheckSame(const unsigned char *MatcherTable, unsigned &MatcherIndex,
 /// CheckPatternPredicate - Implements OP_CheckPatternPredicate.
 LLVM_ATTRIBUTE_ALWAYS_INLINE static bool
 CheckPatternPredicate(const unsigned char *MatcherTable, unsigned &MatcherIndex,
-                      SelectionDAGISel &SDISel) {
+                      const SelectionDAGISel &SDISel) {
   return SDISel.CheckPatternPredicate(MatcherTable[MatcherIndex++]);
 }
 
 /// CheckNodePredicate - Implements OP_CheckNodePredicate.
 LLVM_ATTRIBUTE_ALWAYS_INLINE static bool
 CheckNodePredicate(const unsigned char *MatcherTable, unsigned &MatcherIndex,
-                   SelectionDAGISel &SDISel, SDNode *N) {
+                   const SelectionDAGISel &SDISel, SDNode *N) {
   return SDISel.CheckNodePredicate(N, MatcherTable[MatcherIndex++]);
 }
 
@@ -2079,7 +2078,7 @@ CheckInteger(const unsigned char *MatcherTable, unsigned &MatcherIndex,
 
 LLVM_ATTRIBUTE_ALWAYS_INLINE static bool
 CheckAndImm(const unsigned char *MatcherTable, unsigned &MatcherIndex,
-            SDValue N, SelectionDAGISel &SDISel) {
+            SDValue N, const SelectionDAGISel &SDISel) {
   int64_t Val = MatcherTable[MatcherIndex++];
   if (Val & 128)
     Val = GetVBR(Val, MatcherTable, MatcherIndex);
@@ -2092,7 +2091,7 @@ CheckAndImm(const unsigned char *MatcherTable, unsigned &MatcherIndex,
 
 LLVM_ATTRIBUTE_ALWAYS_INLINE static bool
 CheckOrImm(const unsigned char *MatcherTable, unsigned &MatcherIndex,
-           SDValue N, SelectionDAGISel &SDISel) {
+           SDValue N, const SelectionDAGISel &SDISel) {
   int64_t Val = MatcherTable[MatcherIndex++];
   if (Val & 128)
     Val = GetVBR(Val, MatcherTable, MatcherIndex);
@@ -2111,7 +2110,8 @@ CheckOrImm(const unsigned char *MatcherTable, unsigned &MatcherIndex,
 /// MatcherIndex to continue with.
 static unsigned IsPredicateKnownToFail(const unsigned char *Table,
                                        unsigned Index, SDValue N,
-                                       bool &Result, SelectionDAGISel &SDISel,
+                                       bool &Result,
+                                       const SelectionDAGISel &SDISel,
                  SmallVectorImpl<std::pair<SDValue, SDNode*> > &RecordedNodes) {
   switch (Table[Index++]) {
   default:
@@ -2981,6 +2981,7 @@ void SelectionDAGISel::CannotYetSelect(SDNode *N) {
       N->getOpcode() != ISD::INTRINSIC_WO_CHAIN &&
       N->getOpcode() != ISD::INTRINSIC_VOID) {
     N->printrFull(Msg, CurDAG);
+    Msg << "\nIn function: " << MF->getFunction()->getName();
   } else {
     bool HasInputChain = N->getOperand(0).getValueType() == MVT::Other;
     unsigned iid =

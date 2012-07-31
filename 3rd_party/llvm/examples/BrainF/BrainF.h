@@ -15,9 +15,9 @@
 #ifndef BRAINF_H
 #define BRAINF_H
 
+#include "llvm/IRBuilder.h"
 #include "llvm/LLVMContext.h"
 #include "llvm/Module.h"
-#include "llvm/Support/IRBuilder.h"
 
 using namespace llvm;
 
@@ -90,5 +90,4 @@ class BrainF {
     IRBuilder<> *builder;
     Value *curhead;
 };
-
 #endif

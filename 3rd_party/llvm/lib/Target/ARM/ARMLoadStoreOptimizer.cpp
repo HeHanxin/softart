@@ -1177,8 +1177,6 @@ bool ARMLoadStoreOpt::FixInvalidRegPairOp(MachineBasicBlock &MBB,
                       BaseReg, false, BaseUndef, false, OffUndef,
                       Pred, PredReg, TII, isT2);
         NewBBI = llvm::prior(MBBI);
-        if (isT2 && NewOpc == ARM::t2LDRi8 && OffImm+4 >= 0)
-          NewOpc = ARM::t2LDRi12;
         InsertLDR_STR(MBB, MBBI, OffImm, isLd, dl, NewOpc,
                       EvenReg, EvenDeadKill, false,
                       BaseReg, BaseKill, BaseUndef, OffKill, OffUndef,
@@ -1739,7 +1737,7 @@ bool ARMPreAllocLoadStoreOpt::RescheduleOps(MachineBasicBlock *MBB,
           Ops.pop_back();
 
           const MCInstrDesc &MCID = TII->get(NewOpc);
-          const TargetRegisterClass *TRC = TII->getRegClass(MCID, 0, TRI);
+          const TargetRegisterClass *TRC = TII->getRegClass(MCID, 0, TRI, *MF);
           MRI->constrainRegClass(EvenReg, TRC);
           MRI->constrainRegClass(OddReg, TRC);
 

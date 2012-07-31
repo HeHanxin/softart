@@ -62,12 +62,14 @@ ARMBaseRegisterInfo::ARMBaseRegisterInfo(const ARMBaseInstrInfo &tii,
 
 const uint16_t*
 ARMBaseRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
-  return (STI.isTargetIOS()) ? CSR_iOS_SaveList : CSR_AAPCS_SaveList;
+  return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
+    ? CSR_iOS_SaveList : CSR_AAPCS_SaveList;
 }
 
 const uint32_t*
 ARMBaseRegisterInfo::getCallPreservedMask(CallingConv::ID) const {
-  return (STI.isTargetIOS()) ? CSR_iOS_RegMask : CSR_AAPCS_RegMask;
+  return (STI.isTargetIOS() && !STI.isAAPCS_ABI())
+    ? CSR_iOS_RegMask : CSR_AAPCS_RegMask;
 }
 
 BitVector ARMBaseRegisterInfo::
@@ -257,7 +259,8 @@ ARMBaseRegisterInfo::getLargestLegalSuperClass(const TargetRegisterClass *RC)
 }
 
 const TargetRegisterClass *
-ARMBaseRegisterInfo::getPointerRegClass(unsigned Kind) const {
+ARMBaseRegisterInfo::getPointerRegClass(const MachineFunction &MF, unsigned Kind)
+                                                                         const {
   return &ARM::GPRRegClass;
 }
 
@@ -712,6 +715,11 @@ requiresRegisterScavenging(const MachineFunction &MF) const {
 }
 
 bool ARMBaseRegisterInfo::
+trackLivenessAfterRegAlloc(const MachineFunction &MF) const {
+  return true;
+}
+
+bool ARMBaseRegisterInfo::
 requiresFrameIndexScavenging(const MachineFunction &MF) const {
   return true;
 }
@@ -932,7 +940,8 @@ materializeFrameBaseRegister(MachineBasicBlock *MBB,
 
   const MCInstrDesc &MCID = TII.get(ADDriOpc);
   MachineRegisterInfo &MRI = MBB->getParent()->getRegInfo();
-  MRI.constrainRegClass(BaseReg, TII.getRegClass(MCID, 0, this));
+  const MachineFunction &MF = *MBB->getParent();
+  MRI.constrainRegClass(BaseReg, TII.getRegClass(MCID, 0, this, MF));
 
   MachineInstrBuilder MIB = AddDefaultPred(BuildMI(*MBB, Ins, DL, MCID, BaseReg)
     .addFrameIndex(FrameIdx).addImm(Offset));
