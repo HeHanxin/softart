@@ -17,9 +17,10 @@
 #include "DwarfAccelTable.h"
 #include "DwarfCompileUnit.h"
 #include "llvm/Constants.h"
+#include "llvm/DebugInfo.h"
+#include "llvm/DIBuilder.h"
 #include "llvm/Module.h"
 #include "llvm/Instructions.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -32,11 +33,10 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Analysis/DebugInfo.h"
-#include "llvm/Analysis/DIBuilder.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -117,7 +117,6 @@ DIType DbgVariable::getType() const {
       if (getName() == DT.getName())
         return (DT.getTypeDerivedFrom());
     }
-    return Ty;
   }
   return Ty;
 }
@@ -127,7 +126,9 @@ DIType DbgVariable::getType() const {
 DwarfDebug::DwarfDebug(AsmPrinter *A, Module *M)
   : Asm(A), MMI(Asm->MMI), FirstCU(0),
     AbbreviationsSet(InitAbbreviationsSetSize),
-    PrevLabel(NULL) {
+    SourceIdMap(DIEValueAllocator), StringPool(DIEValueAllocator),
+    PrevLabel(NULL),
+    HasNonTextSection(false) {
   NextStringPoolNumber = 0;
 
   DwarfInfoSectionSym = DwarfAbbrevSectionSym = 0;
@@ -561,12 +562,9 @@ CompileUnit *DwarfDebug::constructCompileUnit(const MDNode *N) {
   NewCU->addUInt(Die, dwarf::DW_AT_language, dwarf::DW_FORM_data2,
                  DIUnit.getLanguage());
   NewCU->addString(Die, dwarf::DW_AT_name, FN);
-  // 2.17.1 requires that we use DW_AT_low_pc for a single entry point
-  // into an entity.
-  NewCU->addUInt(Die, dwarf::DW_AT_low_pc, dwarf::DW_FORM_addr, 0);
   // DW_AT_stmt_list is a offset of line number information for this
   // compile unit in debug_line section.
-  if (Asm->MAI->doesDwarfRequireRelocationForSectionOffset())
+  if (Asm->MAI->doesDwarfUseRelocationsAcrossSections())
     NewCU->addLabel(Die, dwarf::DW_AT_stmt_list, dwarf::DW_FORM_data4,
                     Asm->GetTempSymbol("section_line"));
   else
@@ -787,12 +785,25 @@ void DwarfDebug::endModule() {
     FirstCU->addUInt(ISP, dwarf::DW_AT_inline, 0, dwarf::DW_INL_inlined);
   }
 
-  // Emit DW_AT_containing_type attribute to connect types with their
-  // vtable holding type.
   for (DenseMap<const MDNode *, CompileUnit *>::iterator CUI = CUMap.begin(),
          CUE = CUMap.end(); CUI != CUE; ++CUI) {
+    // Emit DW_AT_containing_type attribute to connect types with their
+    // vtable holding type.
     CompileUnit *TheCU = CUI->second;
     TheCU->constructContainingTypeDIEs();
+
+    // Emit low_pc and high_pc for CU.
+    DIE *Die = TheCU->getCUDie();
+    if (HasNonTextSection) {
+      // 2.17.1 requires that we use DW_AT_low_pc for a single entry point
+      // into an entity.
+      TheCU->addUInt(Die, dwarf::DW_AT_low_pc, dwarf::DW_FORM_addr, 0);
+    } else {
+      TheCU->addLabel(Die, dwarf::DW_AT_low_pc, dwarf::DW_FORM_addr,
+                      Asm->GetTempSymbol("text_begin"));
+      TheCU->addLabel(Die, dwarf::DW_AT_high_pc, dwarf::DW_FORM_addr,
+                      Asm->GetTempSymbol("text_end"));
+    }
   }
 
   // Standard sections final addresses.
@@ -852,6 +863,7 @@ void DwarfDebug::endModule() {
          E = CUMap.end(); I != E; ++I)
     delete I->second;
   FirstCU = NULL;  // Reset for the next Module, if any.
+  HasNonTextSection = false;
 }
 
 /// findAbstractVariable - Find abstract variable, if any, associated with Var.
@@ -1220,6 +1232,9 @@ void DwarfDebug::beginFunction(const MachineFunction *MF) {
   if (LScopes.empty()) return;
   identifyScopeMarkers();
 
+  if (!Asm->getCurrentSection()->getKind().isText())
+    HasNonTextSection = true;
+
   FunctionBeginSym = Asm->GetTempSymbol("func_begin",
                                         Asm->getFunctionNumber());
   // Assumes in correct section after the entry point.
@@ -1310,8 +1325,9 @@ void DwarfDebug::beginFunction(const MachineFunction *MF) {
                MOE = MI->operands_end(); MOI != MOE; ++MOI) {
           if (!MOI->isReg() || !MOI->isDef() || !MOI->getReg())
             continue;
-          for (const uint16_t *AI = TRI->getOverlaps(MOI->getReg());
-               unsigned Reg = *AI; ++AI) {
+          for (MCRegAliasIterator AI(MOI->getReg(), TRI, true);
+               AI.isValid(); ++AI) {
+            unsigned Reg = *AI;
             const MDNode *Var = LiveUserVar[Reg];
             if (!Var)
               continue;
@@ -1381,7 +1397,7 @@ void DwarfDebug::beginFunction(const MachineFunction *MF) {
                                        MF->getFunction()->getContext());
     recordSourceLine(FnStartDL.getLine(), FnStartDL.getCol(),
                      FnStartDL.getScope(MF->getFunction()->getContext()),
-                     0);
+                     DWARF2_LINE_DEFAULT_IS_STMT ? DWARF2_FLAG_IS_STMT : 0);
   }
 }
 
@@ -1420,6 +1436,12 @@ void DwarfDebug::endFunction(const MachineFunction *MF) {
       for (unsigned i = 0, e = Variables.getNumElements(); i != e; ++i) {
         DIVariable DV(Variables.getElement(i));
         if (!DV || !DV.Verify() || !ProcessedVars.insert(DV))
+          continue;
+        // Check that DbgVariable for DV wasn't created earlier, when
+        // findAbstractVariable() was called for inlined instance of DV.
+        LLVMContext &Ctx = DV->getContext();
+        DIVariable CleanDV = cleanseInlinedVariable(DV, Ctx);
+        if (AbstractVariables.lookup(CleanDV))
           continue;
         if (LexicalScope *Scope = LScopes.findAbstractScope(DV.getContext()))
           addScopeVariable(Scope, new DbgVariable(DV, NULL));
@@ -1623,7 +1645,7 @@ void DwarfDebug::emitDIE(DIE *Die) {
       // DW_AT_range Value encodes offset in debug_range section.
       DIEInteger *V = cast<DIEInteger>(Values[i]);
 
-      if (Asm->MAI->doesDwarfUseLabelOffsetForRanges()) {
+      if (Asm->MAI->doesDwarfUseRelocationsAcrossSections()) {
         Asm->EmitLabelPlusOffset(DwarfDebugRangeSectionSym,
                                  V->getValue(),
                                  4);
@@ -1636,10 +1658,14 @@ void DwarfDebug::emitDIE(DIE *Die) {
       break;
     }
     case dwarf::DW_AT_location: {
-      if (DIELabel *L = dyn_cast<DIELabel>(Values[i]))
-        Asm->EmitLabelDifference(L->getValue(), DwarfDebugLocSectionSym, 4);
-      else
+      if (DIELabel *L = dyn_cast<DIELabel>(Values[i])) {
+        if (Asm->MAI->doesDwarfUseRelocationsAcrossSections())
+          Asm->EmitLabelReference(L->getValue(), 4);
+        else
+          Asm->EmitLabelDifference(L->getValue(), DwarfDebugLocSectionSym, 4);
+      } else {
         Values[i]->EmitValue(Asm, Form);
+      }
       break;
     }
     case dwarf::DW_AT_accessibility: {
@@ -2049,9 +2075,11 @@ void DwarfDebug::emitDebugLoc() {
             if (Element == DIBuilder::OpPlus) {
               Asm->EmitInt8(dwarf::DW_OP_plus_uconst);
               Asm->EmitULEB128(DV.getAddrElement(++i));
-            } else if (Element == DIBuilder::OpDeref)
-              Asm->EmitInt8(dwarf::DW_OP_deref);
-            else llvm_unreachable("unknown Opcode found in complex address");
+            } else if (Element == DIBuilder::OpDeref) {
+              if (!Entry.Loc.isReg())
+                Asm->EmitInt8(dwarf::DW_OP_deref);
+            } else
+              llvm_unreachable("unknown Opcode found in complex address");
           }
         }
       }
