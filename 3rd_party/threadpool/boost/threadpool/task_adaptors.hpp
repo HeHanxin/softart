@@ -22,6 +22,9 @@
 #include <boost/function.hpp>
 #include <boost/thread.hpp>
 
+#if BOOST_VERSION < 105100
+#define TIME_UTC_ TIME_UTC
+#endif
 
 namespace boost { namespace threadpool
 {
@@ -135,7 +138,7 @@ namespace boost { namespace threadpool
         if(m_break_s > 0 || m_break_ns > 0)
         { // Sleep some time before first execution
           xtime xt;
-          xtime_get(&xt, TIME_UTC);
+          xtime_get(&xt, TIME_UTC_);
           xt.nsec += m_break_ns;
           xt.sec += m_break_s;
           thread::sleep(xt); 
@@ -146,7 +149,7 @@ namespace boost { namespace threadpool
           if(m_break_s > 0 || m_break_ns > 0)
           {
             xtime xt;
-            xtime_get(&xt, TIME_UTC);
+            xtime_get(&xt, TIME_UTC_);
             xt.nsec += m_break_ns;
             xt.sec += m_break_s;
             thread::sleep(xt); 
