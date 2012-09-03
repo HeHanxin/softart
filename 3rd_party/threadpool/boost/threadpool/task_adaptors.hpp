@@ -22,7 +22,7 @@
 #include <boost/function.hpp>
 #include <boost/thread.hpp>
 
-#if BOOST_VERSION < 105100
+#if BOOST_VERSION < 105000
 #define TIME_UTC_ TIME_UTC
 #endif
 
