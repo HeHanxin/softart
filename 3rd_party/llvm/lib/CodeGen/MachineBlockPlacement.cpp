@@ -26,6 +26,11 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "block-placement2"
+#include "llvm/CodeGen/Passes.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineBranchProbabilityInfo.h"
@@ -33,13 +38,9 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/Support/Allocator.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/Statistic.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetLowering.h"
 #include <algorithm>
@@ -51,6 +52,11 @@ STATISTIC(CondBranchTakenFreq,
           "Potential frequency of taking conditional branches");
 STATISTIC(UncondBranchTakenFreq,
           "Potential frequency of taking unconditional branches");
+
+static cl::opt<unsigned> AlignAllBlock("align-all-blocks",
+                                       cl::desc("Force the alignment of all "
+                                                "blocks in the function."),
+                                       cl::init(0), cl::Hidden);
 
 namespace {
 class BlockChain;
@@ -171,7 +177,7 @@ class MachineBlockPlacement : public MachineFunctionPass {
   const TargetInstrInfo *TII;
 
   /// \brief A handle to the target's lowering info.
-  const TargetLowering *TLI;
+  const TargetLoweringBase *TLI;
 
   /// \brief Allocator and owner of BlockChain structures.
   ///
@@ -500,11 +506,10 @@ void MachineBlockPlacement::buildChain(
     assert(BB);
     assert(BlockToChain[BB] == &Chain);
     assert(*llvm::prior(Chain.end()) == BB);
-    MachineBasicBlock *BestSucc = 0;
 
     // Look for the best viable successor if there is one to place immediately
     // after this block.
-    BestSucc = selectBestSuccessor(BB, Chain, BlockFilter);
+    MachineBasicBlock *BestSucc = selectBestSuccessor(BB, Chain, BlockFilter);
 
     // If an immediate successor isn't available, look for the best viable
     // block among those we've identified as not violating the loop's CFG at
@@ -985,8 +990,22 @@ void MachineBlockPlacement::buildCFGChains(MachineFunction &F) {
     // boiler plate.
     Cond.clear();
     MachineBasicBlock *TBB = 0, *FBB = 0; // For AnalyzeBranch.
-    if (!TII->AnalyzeBranch(*PrevBB, TBB, FBB, Cond))
+    if (!TII->AnalyzeBranch(*PrevBB, TBB, FBB, Cond)) {
+      // If PrevBB has a two-way branch, try to re-order the branches
+      // such that we branch to the successor with higher weight first.
+      if (TBB && !Cond.empty() && FBB &&
+          MBPI->getEdgeWeight(PrevBB, FBB) > MBPI->getEdgeWeight(PrevBB, TBB) &&
+          !TII->ReverseBranchCondition(Cond)) {
+        DEBUG(dbgs() << "Reverse order of the two branches: "
+                     << getBlockName(PrevBB) << "\n");
+        DEBUG(dbgs() << "    Edge weight: " << MBPI->getEdgeWeight(PrevBB, FBB)
+                     << " vs " << MBPI->getEdgeWeight(PrevBB, TBB) << "\n");
+        DebugLoc dl;  // FIXME: this is nowhere
+        TII->RemoveBranch(*PrevBB);
+        TII->InsertBranch(*PrevBB, FBB, TBB, Cond, dl);
+      }
       PrevBB->updateTerminator();
+    }
   }
 
   // Fixup the last block.
@@ -997,29 +1016,64 @@ void MachineBlockPlacement::buildCFGChains(MachineFunction &F) {
 
   // Walk through the backedges of the function now that we have fully laid out
   // the basic blocks and align the destination of each backedge. We don't rely
-  // on the loop info here so that we can align backedges in unnatural CFGs and
-  // backedges that were introduced purely because of the loop rotations done
-  // during this layout pass.
-  // FIXME: This isn't quite right, we shouldn't align backedges that result
-  // from blocks being sunken below the exit block for the function.
-  if (F.getFunction()->hasFnAttr(Attribute::OptimizeForSize))
+  // exclusively on the loop info here so that we can align backedges in
+  // unnatural CFGs and backedges that were introduced purely because of the
+  // loop rotations done during this layout pass.
+  if (F.getFunction()->getAttributes().
+        hasAttribute(AttributeSet::FunctionIndex, Attribute::OptimizeForSize))
     return;
   unsigned Align = TLI->getPrefLoopAlignment();
   if (!Align)
     return;  // Don't care about loop alignment.
+  if (FunctionChain.begin() == FunctionChain.end())
+    return;  // Empty chain.
 
-  SmallPtrSet<MachineBasicBlock *, 16> PreviousBlocks;
-  for (BlockChain::iterator BI = FunctionChain.begin(),
+  const BranchProbability ColdProb(1, 5); // 20%
+  BlockFrequency EntryFreq = MBFI->getBlockFreq(F.begin());
+  BlockFrequency WeightedEntryFreq = EntryFreq * ColdProb;
+  for (BlockChain::iterator BI = llvm::next(FunctionChain.begin()),
                             BE = FunctionChain.end();
        BI != BE; ++BI) {
-    PreviousBlocks.insert(*BI);
-    // Set alignment on the destination of all the back edges in the new
-    // ordering.
-    for (MachineBasicBlock::succ_iterator SI = (*BI)->succ_begin(),
-                                          SE = (*BI)->succ_end();
-         SI != SE; ++SI)
-      if (PreviousBlocks.count(*SI))
-        (*SI)->setAlignment(Align);
+    // Don't align non-looping basic blocks. These are unlikely to execute
+    // enough times to matter in practice. Note that we'll still handle
+    // unnatural CFGs inside of a natural outer loop (the common case) and
+    // rotated loops.
+    MachineLoop *L = MLI->getLoopFor(*BI);
+    if (!L)
+      continue;
+
+    // If the block is cold relative to the function entry don't waste space
+    // aligning it.
+    BlockFrequency Freq = MBFI->getBlockFreq(*BI);
+    if (Freq < WeightedEntryFreq)
+      continue;
+
+    // If the block is cold relative to its loop header, don't align it
+    // regardless of what edges into the block exist.
+    MachineBasicBlock *LoopHeader = L->getHeader();
+    BlockFrequency LoopHeaderFreq = MBFI->getBlockFreq(LoopHeader);
+    if (Freq < (LoopHeaderFreq * ColdProb))
+      continue;
+
+    // Check for the existence of a non-layout predecessor which would benefit
+    // from aligning this block.
+    MachineBasicBlock *LayoutPred = *llvm::prior(BI);
+
+    // Force alignment if all the predecessors are jumps. We already checked
+    // that the block isn't cold above.
+    if (!LayoutPred->isSuccessor(*BI)) {
+      (*BI)->setAlignment(Align);
+      continue;
+    }
+
+    // Align this block if the layout predecessor's edge into this block is
+    // cold relative to the block. When this is true, other predecessors make up
+    // all of the hot entries into the block and thus alignment is likely to be
+    // important.
+    BranchProbability LayoutProb = MBPI->getEdgeProbability(LayoutPred, *BI);
+    BlockFrequency LayoutEdgeFreq = MBFI->getBlockFreq(LayoutPred) * LayoutProb;
+    if (LayoutEdgeFreq <= (Freq * ColdProb))
+      (*BI)->setAlignment(Align);
   }
 }
 
@@ -1039,6 +1093,12 @@ bool MachineBlockPlacement::runOnMachineFunction(MachineFunction &F) {
 
   BlockToChain.clear();
   ChainAllocator.DestroyAll();
+
+  if (AlignAllBlock)
+    // Align all of the blocks in the function to a specific alignment.
+    for (MachineFunction::iterator FI = F.begin(), FE = F.end();
+         FI != FE; ++FI)
+      FI->setAlignment(AlignAllBlock);
 
   // We always return true as we have no way to track whether the final order
   // differs from the original order.

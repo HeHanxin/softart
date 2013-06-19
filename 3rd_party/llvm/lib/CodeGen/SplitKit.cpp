@@ -14,7 +14,6 @@
 
 #define DEBUG_TYPE "regalloc"
 #include "SplitKit.h"
-#include "VirtRegMap.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
 #include "llvm/CodeGen/LiveRangeEdit.h"
@@ -22,6 +21,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
@@ -356,6 +356,7 @@ void SplitEditor::reset(LiveRangeEdit &LRE, ComplementSpillMode SM) {
   Edit->anyRematerializable(0);
 }
 
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
 void SplitEditor::dump() const {
   if (RegAssign.empty()) {
     dbgs() << " empty\n";
@@ -366,6 +367,7 @@ void SplitEditor::dump() const {
     dbgs() << " [" << I.start() << ';' << I.stop() << "):" << I.value();
   dbgs() << '\n';
 }
+#endif
 
 VNInfo *SplitEditor::defValue(unsigned RegIdx,
                               const VNInfo *ParentVNI,
@@ -652,7 +654,7 @@ void SplitEditor::removeBackCopies(SmallVectorImpl<VNInfo*> &Copies) {
     // Adjust RegAssign if a register assignment is killed at VNI->def.  We
     // want to avoid calculating the live range of the source register if
     // possible.
-    AssignI.find(VNI->def.getPrevSlot());
+    AssignI.find(Def.getPrevSlot());
     if (!AssignI.valid() || AssignI.start() >= Def)
       continue;
     // If MI doesn't kill the assigned register, just leave it.
@@ -739,6 +741,8 @@ void SplitEditor::hoistCopiesForSize() {
   for (LiveInterval::vni_iterator VI = LI->vni_begin(), VE = LI->vni_end();
        VI != VE; ++VI) {
     VNInfo *VNI = *VI;
+    if (VNI->isUnused())
+      continue;
     VNInfo *ParentVNI = Edit->getParent().getVNInfoAt(VNI->def);
     assert(ParentVNI && "Parent not live at complement def");
 
@@ -812,6 +816,8 @@ void SplitEditor::hoistCopiesForSize() {
   for (LiveInterval::vni_iterator VI = LI->vni_begin(), VE = LI->vni_end();
        VI != VE; ++VI) {
     VNInfo *VNI = *VI;
+    if (VNI->isUnused())
+      continue;
     VNInfo *ParentVNI = Edit->getParent().getVNInfoAt(VNI->def);
     const DomPair &Dom = NearestDom[ParentVNI->id];
     if (!Dom.first || Dom.second == VNI->def)

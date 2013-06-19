@@ -110,6 +110,24 @@ namespace Mips {
     // resulting in - R_MIPS_GOT_DISP
     fixup_Mips_GOT_DISP,
 
+    // resulting in - R_MIPS_GOT_HIGHER
+    fixup_Mips_HIGHER,
+
+    // resulting in - R_MIPS_HIGHEST
+    fixup_Mips_HIGHEST,
+
+    // resulting in - R_MIPS_GOT_HI16
+    fixup_Mips_GOT_HI16,
+
+    // resulting in - R_MIPS_GOT_LO16
+    fixup_Mips_GOT_LO16,
+
+    // resulting in - R_MIPS_CALL_HI16
+    fixup_Mips_CALL_HI16,
+
+    // resulting in - R_MIPS_CALL_LO16
+    fixup_Mips_CALL_LO16,
+
     // Marker
     LastTargetFixupKind,
     NumTargetFixupKinds = LastTargetFixupKind - FirstTargetFixupKind

@@ -17,12 +17,12 @@
 #include "ARMConstantPoolValue.h"
 #include "ARMRelocations.h"
 #include "ARMSubtarget.h"
-#include "llvm/Function.h"
 #include "llvm/CodeGen/JITCodeEmitter.h"
+#include "llvm/IR/Function.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Memory.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cstdlib>
 using namespace llvm;
 
@@ -168,7 +168,7 @@ void *ARMJITInfo::emitFunctionStub(const Function* F, void *Fn,
       intptr_t LazyPtr = getIndirectSymAddr(Fn);
       if (!LazyPtr) {
         // In PIC mode, the function stub is loading a lazy-ptr.
-        LazyPtr= (intptr_t)emitGlobalValueIndirectSym((GlobalValue*)F, Fn, JCE);
+        LazyPtr= (intptr_t)emitGlobalValueIndirectSym((const GlobalValue*)F, Fn, JCE);
         DEBUG(if (F)
                 errs() << "JIT: Indirect symbol emitted at [" << LazyPtr
                        << "] for GV '" << F->getName() << "'\n";
@@ -289,9 +289,9 @@ void ARMJITInfo::relocate(void *Function, MachineRelocation *MR,
       if (MR->getRelocationType() == ARM::reloc_arm_vfp_cp_entry)
         ResultPtr = ResultPtr >> 2;
       *((intptr_t*)RelocPos) |= ResultPtr;
-      // Set register Rn to PC.
-      *((intptr_t*)RelocPos) |=
-        getARMRegisterNumbering(ARM::PC) << ARMII::RegRnShift;
+      // Set register Rn to PC (which is register 15 on all architectures).
+      // FIXME: This avoids the need for register info in the JIT class.
+      *((intptr_t*)RelocPos) |= 15 << ARMII::RegRnShift;
       break;
     }
     case ARM::reloc_arm_pic_jt:

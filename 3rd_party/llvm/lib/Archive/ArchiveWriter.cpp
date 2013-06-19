@@ -11,18 +11,19 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/Bitcode/Archive.h"
 #include "ArchiveInternals.h"
-#include "llvm/Module.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/system_error.h"
 #include <fstream>
-#include <ostream>
 #include <iomanip>
+#include <ostream>
 using namespace llvm;
 
 // Write an integer using variable bit rate encoding. This saves a few bytes
@@ -204,7 +205,6 @@ Archive::writeMember(
   std::ofstream& ARFile,
   bool CreateSymbolTable,
   bool TruncateNames,
-  bool ShouldCompress,
   std::string* ErrMsg
 ) {
 
@@ -349,7 +349,7 @@ Archive::writeSymbolTable(std::ofstream& ARFile) {
 // table, flattening the file names (no directories, 15 chars max) and
 // compressing each archive member.
 bool
-Archive::writeToDisk(bool CreateSymbolTable, bool TruncateNames, bool Compress,
+Archive::writeToDisk(bool CreateSymbolTable, bool TruncateNames,
                      std::string* ErrMsg)
 {
   // Make sure they haven't opened up the file, not loaded it,
@@ -394,7 +394,7 @@ Archive::writeToDisk(bool CreateSymbolTable, bool TruncateNames, bool Compress,
   // builds the symbol table, symTab.
   for (MembersList::iterator I = begin(), E = end(); I != E; ++I) {
     if (writeMember(*I, ArchiveFile, CreateSymbolTable,
-                     TruncateNames, Compress, ErrMsg)) {
+                     TruncateNames, ErrMsg)) {
       TmpArchive.eraseFromDisk();
       ArchiveFile.close();
       return true;
@@ -446,7 +446,7 @@ Archive::writeToDisk(bool CreateSymbolTable, bool TruncateNames, bool Compress,
     // compatibility with other ar(1) implementations as well as allowing the
     // archive to store both native .o and LLVM .bc files, both indexed.
     if (foreignST) {
-      if (writeMember(*foreignST, FinalFile, false, false, false, ErrMsg)) {
+      if (writeMember(*foreignST, FinalFile, false, false, ErrMsg)) {
         FinalFile.close();
         TmpArchive.eraseFromDisk();
         return true;
