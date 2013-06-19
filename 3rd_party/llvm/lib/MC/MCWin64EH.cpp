@@ -8,13 +8,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/MC/MCWin64EH.h"
-#include "llvm/MC/MCStreamer.h"
-#include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCObjectFileInfo.h"
-#include "llvm/MC/MCSymbol.h"
-#include "llvm/MC/MCSectionCOFF.h"
-#include "llvm/MC/MCExpr.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCExpr.h"
+#include "llvm/MC/MCObjectFileInfo.h"
+#include "llvm/MC/MCSectionCOFF.h"
+#include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSymbol.h"
 
 namespace llvm {
 
@@ -228,8 +228,7 @@ static const MCSection *getWin64EHTableSection(StringRef suffix,
 
   return context.getCOFFSection((".xdata"+suffix).str(),
                                 COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                                COFF::IMAGE_SCN_MEM_READ |
-                                COFF::IMAGE_SCN_MEM_WRITE,
+                                COFF::IMAGE_SCN_MEM_READ,
                                 SectionKind::getDataRel());
 }
 
@@ -239,8 +238,7 @@ static const MCSection *getWin64EHFuncTableSection(StringRef suffix,
     return context.getObjectFileInfo()->getPDataSection();
   return context.getCOFFSection((".pdata"+suffix).str(),
                                 COFF::IMAGE_SCN_CNT_INITIALIZED_DATA |
-                                COFF::IMAGE_SCN_MEM_READ |
-                                COFF::IMAGE_SCN_MEM_WRITE,
+                                COFF::IMAGE_SCN_MEM_READ,
                                 SectionKind::getDataRel());
 }
 

@@ -11,7 +11,7 @@ set(CMAKE_MODULE_PATH
   )
 
 set(LLVM_VERSION_MAJOR 3)
-set(LLVM_VERSION_MINOR 2)
+set(LLVM_VERSION_MINOR 3)
 
 set(PACKAGE_VERSION "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}svn")
 
@@ -74,8 +74,8 @@ set(LLVM_EXAMPLES_BINARY_DIR ${LLVM_BINARY_DIR}/examples)
 set(LLVM_LIBDIR_SUFFIX "" CACHE STRING "Define suffix of library directory name (32/64)" )
 
 set(LLVM_ALL_TARGETS
+  AArch64
   ARM
-  CellSPU
   CppBackend
   Hexagon
   Mips
@@ -84,20 +84,19 @@ set(LLVM_ALL_TARGETS
   NVPTX
   PowerPC
   Sparc
+  SystemZ
   X86
   XCore
   )
 
 # List of targets with JIT support:
-set(LLVM_TARGETS_WITH_JIT X86 PowerPC ARM Mips)
+set(LLVM_TARGETS_WITH_JIT X86 PowerPC ARM Mips SystemZ)
 
-if( MSVC )
-  set(LLVM_TARGETS_TO_BUILD X86
+set(LLVM_TARGETS_TO_BUILD "all"
     CACHE STRING "Semicolon-separated list of targets to build, or \"all\".")
-else( MSVC )
-  set(LLVM_TARGETS_TO_BUILD "all"
-    CACHE STRING "Semicolon-separated list of targets to build, or \"all\".")
-endif( MSVC )
+
+set(LLVM_EXPERIMENTAL_TARGETS_TO_BUILD ""
+  CACHE STRING "Semicolon-separated list of experimental targets to build.")
 
 option(BUILD_SHARED_LIBS
   "Build all libraries as shared libraries instead of static" OFF)
@@ -112,6 +111,11 @@ if(LLVM_ENABLE_TIMESTAMPS)
   set(ENABLE_TIMESTAMPS 1)
 endif()
 
+option(LLVM_ENABLE_BACKTRACES "Enable embedding backtraces on crash." ON)
+if(LLVM_ENABLE_BACKTRACES)
+  set(ENABLE_BACKTRACES 1)
+endif()
+
 option(LLVM_ENABLE_FFI "Use libffi to call external functions from the interpreter" OFF)
 set(FFI_LIBRARY_DIR "" CACHE PATH "Additional directory, where CMake should search for libffi.so")
 set(FFI_INCLUDE_DIR "" CACHE PATH "Additional directory, where CMake should search for ffi.h or ffi/ffi.h")
@@ -121,14 +125,21 @@ set(LLVM_TARGET_ARCH "host"
 
 option(LLVM_ENABLE_THREADS "Use threads if available." ON)
 
+option(LLVM_ENABLE_ZLIB "Use zlib for compression/decompression if available." ON)
+
 if( LLVM_TARGETS_TO_BUILD STREQUAL "all" )
   set( LLVM_TARGETS_TO_BUILD ${LLVM_ALL_TARGETS} )
 endif()
 
+set(LLVM_TARGETS_TO_BUILD
+   ${LLVM_TARGETS_TO_BUILD}
+   ${LLVM_EXPERIMENTAL_TARGETS_TO_BUILD})
+
 set(LLVM_ENUM_TARGETS "")
 foreach(c ${LLVM_TARGETS_TO_BUILD})
   list(FIND LLVM_ALL_TARGETS ${c} idx)
-  if( idx LESS 0 )
+  list(FIND LLVM_EXPERIMENTAL_TARGETS_TO_BUILD ${c} idy)
+  if( idx LESS 0 AND idy LESS 0 )
     message(FATAL_ERROR "The target `${c}' does not exist.
     It should be one of\n${LLVM_ALL_TARGETS}")
   else()
@@ -181,23 +192,7 @@ option(LLVM_USE_INTEL_JITEVENTS
 
 if( LLVM_USE_INTEL_JITEVENTS )
   # Verify we are on a supported platform
-  if( CMAKE_SYSTEM_NAME MATCHES "Windows" OR CMAKE_SYSTEM_NAME MATCHES "Linux" )
-    # Directory where Intel Parallel Amplifier XE 2011 is installed.
-    if ( WIN32 )
-      set(LLVM_INTEL_JITEVENTS_DIR $ENV{VTUNE_AMPLIFIER_XE_2011_DIR})
-    else ( WIN32 )
-      set(LLVM_INTEL_JITEVENTS_DIR "/opt/intel/vtune_amplifier_xe_2011")
-    endif ( WIN32 )
-
-    # Set include and library search paths for Intel JIT Events API
-    set(LLVM_INTEL_JITEVENTS_INCDIR "${LLVM_INTEL_JITEVENTS_DIR}/include")
-
-    if ( CMAKE_SIZEOF_VOID_P EQUAL 8 )
-      set(LLVM_INTEL_JITEVENTS_LIBDIR "${LLVM_INTEL_JITEVENTS_DIR}/lib64")
-    else ( CMAKE_SIZEOF_VOID_P EQUAL 8 )
-      set(LLVM_INTEL_JITEVENTS_LIBDIR "${LLVM_INTEL_JITEVENTS_DIR}/lib32")
-    endif ( CMAKE_SIZEOF_VOID_P EQUAL 8 )
-  else()
+  if( NOT CMAKE_SYSTEM_NAME MATCHES "Windows" AND NOT CMAKE_SYSTEM_NAME MATCHES "Linux" )
     message(FATAL_ERROR
       "Intel JIT API support is available on Linux and Windows only.")
   endif()
@@ -206,12 +201,15 @@ endif( LLVM_USE_INTEL_JITEVENTS )
 option(LLVM_USE_OPROFILE
   "Use opagent JIT interface to inform OProfile about JIT code" OFF)
 
-# If enabled, ierify we are on a platform that supports oprofile.
+# If enabled, verify we are on a platform that supports oprofile.
 if( LLVM_USE_OPROFILE )
   if( NOT CMAKE_SYSTEM_NAME MATCHES "Linux" )
     message(FATAL_ERROR "OProfile support is available on Linux only.") 
   endif( NOT CMAKE_SYSTEM_NAME MATCHES "Linux" )
 endif( LLVM_USE_OPROFILE )
+
+set(LLVM_USE_SANITIZER "" CACHE STRING
+  "Define the sanitizer used to build binaries and tests.")
 
 # Define an option controlling whether we should build for 32-bit on 64-bit
 # platforms, where supported.
@@ -258,6 +256,13 @@ option(LLVM_INCLUDE_TESTS "Generate build targets for the LLVM unit tests." ON)
 # BEFORE this include, otherwise options will not be correctly set on
 # first cmake run
 include(config-ix)
+
+# By default, we target the host, but this can be overridden at CMake
+# invocation time.
+set(LLVM_DEFAULT_TARGET_TRIPLE "${LLVM_HOST_TRIPLE}" CACHE STRING
+  "Default target for which LLVM will generate code." )
+set(TARGET_TRIPLE "${LLVM_DEFAULT_TARGET_TRIPLE}")
+
 include(HandleLLVMOptions)
 
 # Verify that we can find a Python interpreter,
@@ -389,9 +394,20 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include_directories( ${LLVM_BINARY_DIR}/include ${LLVM_MAIN_INCLUDE_DIR})
 
+if( ${CMAKE_SYSTEM_NAME} MATCHES FreeBSD )
+  # On FreeBSD, /usr/local/* is not used by default. In order to build LLVM
+  # with libxml2, iconv.h, etc., we must add /usr/local paths.
+  include_directories("/usr/local/include")
+  link_directories("/usr/local/lib")
+endif( ${CMAKE_SYSTEM_NAME} MATCHES FreeBSD )
+
 if( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -include llvm/Support/Solaris.h")
 endif( ${CMAKE_SYSTEM_NAME} MATCHES SunOS )
+
+# Make sure we don't get -rdynamic in every binary. For those that need it,
+# use set_target_properties(target PROPERTIES ENABLE_EXPORTS 1)
+set(CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS "")
 
 include(AddLLVM)
 include(TableGen)
@@ -418,7 +434,6 @@ add_subdirectory(utils/count)
 add_subdirectory(utils/not)
 add_subdirectory(utils/llvm-lit)
 add_subdirectory(utils/yaml-bench)
-add_subdirectory(utils/obj2yaml)
 
 add_subdirectory(projects)
 
@@ -439,7 +454,7 @@ if( LLVM_INCLUDE_TESTS )
   add_subdirectory(utils/unittest)
   add_subdirectory(unittests)
   if (MSVC)
-    # This utility is used to prevent chrashing tests from calling Dr. Watson on
+    # This utility is used to prevent crashing tests from calling Dr. Watson on
     # Windows.
     add_subdirectory(utils/KillTheDoctor)
   endif()

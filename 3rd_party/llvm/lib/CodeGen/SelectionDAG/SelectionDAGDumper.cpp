@@ -11,23 +11,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ScheduleDAGSDNodes.h"
-#include "llvm/DebugInfo.h"
-#include "llvm/Function.h"
-#include "llvm/Intrinsics.h"
-#include "llvm/Assembly/Writer.h"
 #include "llvm/CodeGen/SelectionDAG.h"
+#include "ScheduleDAGSDNodes.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/Assembly/Writer.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/DebugInfo.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/GraphWriter.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetRegisterInfo.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/GraphWriter.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/ADT/StringExtras.h"
 using namespace llvm;
 
 std::string SDNode::getOperationName(const SelectionDAG *G) const {
@@ -54,7 +54,6 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::DELETED_NODE:               return "<<Deleted Node!>>";
 #endif
   case ISD::PREFETCH:                   return "Prefetch";
-  case ISD::MEMBARRIER:                 return "MemBarrier";
   case ISD::ATOMIC_FENCE:               return "AtomicFence";
   case ISD::ATOMIC_CMP_SWAP:            return "AtomicCmpSwap";
   case ISD::ATOMIC_SWAP:                return "AtomicSwap";
@@ -100,6 +99,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::EH_SJLJ_SETJMP:             return "EH_SJLJ_SETJMP";
   case ISD::EH_SJLJ_LONGJMP:            return "EH_SJLJ_LONGJMP";
   case ISD::ConstantPool:               return "ConstantPool";
+  case ISD::TargetIndex:                return "TargetIndex";
   case ISD::ExternalSymbol:             return "ExternalSymbol";
   case ISD::BlockAddress:               return "BlockAddress";
   case ISD::INTRINSIC_WO_CHAIN:
@@ -139,6 +139,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::FSQRT:                      return "fsqrt";
   case ISD::FSIN:                       return "fsin";
   case ISD::FCOS:                       return "fcos";
+  case ISD::FSINCOS:                    return "fsincos";
   case ISD::FTRUNC:                     return "ftrunc";
   case ISD::FFLOOR:                     return "ffloor";
   case ISD::FCEIL:                      return "fceil";
@@ -266,6 +267,8 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::STACKRESTORE:               return "stackrestore";
   case ISD::TRAP:                       return "trap";
   case ISD::DEBUGTRAP:                  return "debugtrap";
+  case ISD::LIFETIME_START:             return "lifetime.start";
+  case ISD::LIFETIME_END:               return "lifetime.end";
 
   // Bit manipulation
   case ISD::BSWAP:                      return "bswap";
@@ -330,7 +333,7 @@ void SDNode::dump(const SelectionDAG *G) const {
 }
 
 void SDNode::print_types(raw_ostream &OS, const SelectionDAG *G) const {
-  OS << (void*)this << ": ";
+  OS << (const void*)this << ": ";
 
   for (unsigned i = 0, e = getNumValues(); i != e; ++i) {
     if (i) OS << ",";
@@ -409,6 +412,10 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
       OS << " " << offset;
     if (unsigned int TF = CP->getTargetFlags())
       OS << " [TF=" << TF << ']';
+  } else if (const TargetIndexSDNode *TI = dyn_cast<TargetIndexSDNode>(this)) {
+    OS << "<" << TI->getIndex() << '+' << TI->getOffset() << ">";
+    if (unsigned TF = TI->getTargetFlags())
+      OS << " [TF=" << TF << ']';
   } else if (const BasicBlockSDNode *BBDN = dyn_cast<BasicBlockSDNode>(this)) {
     OS << "<";
     const Value *LBB = (const Value*)BBDN->getBasicBlock()->getBasicBlock();
@@ -468,11 +475,16 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
     OS << "<" << *M->getMemOperand() << ">";
   } else if (const BlockAddressSDNode *BA =
                dyn_cast<BlockAddressSDNode>(this)) {
+    int64_t offset = BA->getOffset();
     OS << "<";
     WriteAsOperand(OS, BA->getBlockAddress()->getFunction(), false);
     OS << ", ";
     WriteAsOperand(OS, BA->getBlockAddress()->getBasicBlock(), false);
     OS << ">";
+    if (offset > 0)
+      OS << " + " << offset;
+    else
+      OS << " " << offset;
     if (unsigned int TF = BA->getTargetFlags())
       OS << " [TF=" << TF << ']';
   }
@@ -554,7 +566,7 @@ static void DumpNodesr(raw_ostream &OS, const SDNode *N, unsigned indent,
       child->printr(OS, G);
       once.insert(child);
     } else {         // Just the address. FIXME: also print the child's opcode.
-      OS << (void*)child;
+      OS << (const void*)child;
       if (unsigned RN = N->getOperand(i).getResNo())
         OS << ":" << RN;
     }

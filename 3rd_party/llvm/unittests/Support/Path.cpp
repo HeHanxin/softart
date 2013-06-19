@@ -7,11 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/PathV2.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
-
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -225,6 +224,18 @@ TEST_F(FileSystemTest, TempFiles) {
   // Make sure Temp1 doesn't exist.
   ASSERT_NO_ERROR(fs::exists(Twine(TempPath), TempFileExists));
   EXPECT_FALSE(TempFileExists);
+
+#ifdef LLVM_ON_WIN32
+  // Path name > 260 chars should get an error.
+  const char *Path270 =
+    "abcdefghijklmnopqrstuvwxyz9abcdefghijklmnopqrstuvwxyz8"
+    "abcdefghijklmnopqrstuvwxyz7abcdefghijklmnopqrstuvwxyz6"
+    "abcdefghijklmnopqrstuvwxyz5abcdefghijklmnopqrstuvwxyz4"
+    "abcdefghijklmnopqrstuvwxyz3abcdefghijklmnopqrstuvwxyz2"
+    "abcdefghijklmnopqrstuvwxyz1abcdefghijklmnopqrstuvwxyz0";
+  EXPECT_EQ(fs::unique_file(Twine(Path270), FileDescriptor, TempPath),
+            windows_error::path_not_found);
+#endif
 }
 
 TEST_F(FileSystemTest, DirectoryIteration) {
@@ -287,12 +298,19 @@ TEST_F(FileSystemTest, DirectoryIteration) {
   ASSERT_LT(z0, za1);
 }
 
+const char elf[] = {0x7f, 'E', 'L', 'F', 1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+
 TEST_F(FileSystemTest, Magic) {
   struct type {
     const char *filename;
     const char *magic_str;
-    size_t      magic_str_len;
-  } types [] = {{"magic.archive", "!<arch>\x0A", 8}};
+    size_t magic_str_len;
+    fs::file_magic magic;
+  } types [] = {
+    {"magic.archive", "!<arch>\x0A", 8, fs::file_magic::archive},
+    {"magic.elf", elf, sizeof(elf),
+     fs::file_magic::elf_relocatable}
+  };
 
   // Create some files filled with magic.
   for (type *i = types, *e = types + (sizeof(types) / sizeof(type)); i != e;
@@ -309,6 +327,7 @@ TEST_F(FileSystemTest, Magic) {
     bool res = false;
     ASSERT_NO_ERROR(fs::has_magic(file_pathname.c_str(), magic, res));
     EXPECT_TRUE(res);
+    EXPECT_EQ(i->magic, fs::identify_magic(magic));
   }
 }
 
@@ -340,44 +359,52 @@ TEST_F(FileSystemTest, Permissions) {
 }
 #endif
 
-#if !defined(_WIN32) // FIXME: temporary suppressed.
 TEST_F(FileSystemTest, FileMapping) {
   // Create a temp file.
   int FileDescriptor;
   SmallString<64> TempPath;
   ASSERT_NO_ERROR(
     fs::unique_file("%%-%%-%%-%%.temp", FileDescriptor, TempPath));
-
-  // Grow temp file to be 4096 bytes 
-  ASSERT_NO_ERROR(sys::fs::resize_file(Twine(TempPath), 4096));
-  
   // Map in temp file and add some content
-  void* MappedMemory;
-  ASSERT_NO_ERROR(fs::map_file_pages(Twine(TempPath), 0, 4096, 
-                                true /*writable*/, MappedMemory));
-  char* Memory = reinterpret_cast<char*>(MappedMemory);
-  strcpy(Memory, "hello there");
-  
-  // Unmap temp file
-  ASSERT_NO_ERROR(fs::unmap_file_pages(MappedMemory, 4096));
-  MappedMemory = NULL;
-  Memory = NULL;
+  error_code EC;
+  StringRef Val("hello there");
+  {
+    fs::mapped_file_region mfr(FileDescriptor,
+                               true,
+                               fs::mapped_file_region::readwrite,
+                               4096,
+                               0,
+                               EC);
+    ASSERT_NO_ERROR(EC);
+    std::copy(Val.begin(), Val.end(), mfr.data());
+    // Explicitly add a 0.
+    mfr.data()[Val.size()] = 0;
+    // Unmap temp file
+  }
   
   // Map it back in read-only
-  ASSERT_NO_ERROR(fs::map_file_pages(Twine(TempPath), 0, 4096, 
-                                false /*read-only*/, MappedMemory));
+  fs::mapped_file_region mfr(Twine(TempPath),
+                             fs::mapped_file_region::readonly,
+                             0,
+                             0,
+                             EC);
+  ASSERT_NO_ERROR(EC);
   
   // Verify content
-  Memory = reinterpret_cast<char*>(MappedMemory);
-  bool SAME = (strcmp(Memory, "hello there") == 0);
-  EXPECT_TRUE(SAME);
+  EXPECT_EQ(StringRef(mfr.const_data()), Val);
   
   // Unmap temp file
-  ASSERT_NO_ERROR(fs::unmap_file_pages(MappedMemory, 4096));
-  MappedMemory = NULL;
-  Memory = NULL;
-}
+
+#if LLVM_HAS_RVALUE_REFERENCES
+  fs::mapped_file_region m(Twine(TempPath),
+                             fs::mapped_file_region::readonly,
+                             0,
+                             0,
+                             EC);
+  ASSERT_NO_ERROR(EC);
+  const char *Data = m.const_data();
+  fs::mapped_file_region mfrrv(llvm_move(m));
+  EXPECT_EQ(mfrrv.const_data(), Data);
 #endif
-
-
+}
 } // anonymous namespace

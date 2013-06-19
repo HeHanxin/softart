@@ -19,20 +19,20 @@
 #ifndef LLVM_CODEGEN_SELECTIONDAGNODES_H
 #define LLVM_CODEGEN_SELECTIONDAGNODES_H
 
-#include "llvm/Constants.h"
-#include "llvm/Instructions.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/GraphTraits.h"
-#include "llvm/ADT/ilist_node.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/ilist_node.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
-#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/Support/MathExtras.h"
+#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/Support/DataTypes.h"
 #include "llvm/Support/DebugLoc.h"
+#include "llvm/Support/MathExtras.h"
 #include <cassert>
 
 namespace llvm {
@@ -49,7 +49,7 @@ template <typename T> struct simplify_type;
 template <typename T> struct ilist_traits;
 
 void checkForCycles(const SDNode *N);
-  
+
 /// SDVTList - This represents a list of ValueType's that has been intern'd by
 /// a SelectionDAG.  Instances of this simple value class are returned by
 /// SelectionDAG::getVTList(...).
@@ -108,7 +108,7 @@ public:
   void setNode(SDNode *N) { Node = N; }
 
   inline SDNode *operator->() const { return Node; }
-  
+
   bool operator==(const SDValue &O) const {
     return Node == O.Node && ResNo == O.ResNo;
   }
@@ -130,6 +130,11 @@ public:
   ///
   inline EVT getValueType() const;
 
+  /// Return the simple ValueType of the referenced return value.
+  MVT getSimpleValueType() const {
+    return getValueType().getSimpleVT();
+  }
+
   /// getValueSizeInBits - Returns the size of the value in bits.
   ///
   unsigned getValueSizeInBits() const {
@@ -146,7 +151,8 @@ public:
   inline bool isMachineOpcode() const;
   inline unsigned getMachineOpcode() const;
   inline const DebugLoc getDebugLoc() const;
-
+  inline void dump() const;
+  inline void dumpr() const;
 
   /// reachesChainWithoutSideEffects - Return true if this operand (which must
   /// be a chain) reaches the specified operand without crossing any
@@ -190,14 +196,14 @@ template <> struct isPodLike<SDValue> { static const bool value = true; };
 /// SDValues as if they were SDNode*'s.
 template<> struct simplify_type<SDValue> {
   typedef SDNode* SimpleType;
-  static SimpleType getSimplifiedValue(const SDValue &Val) {
-    return static_cast<SimpleType>(Val.getNode());
+  static SimpleType getSimplifiedValue(SDValue &Val) {
+    return Val.getNode();
   }
 };
 template<> struct simplify_type<const SDValue> {
-  typedef SDNode* SimpleType;
+  typedef /*const*/ SDNode* SimpleType;
   static SimpleType getSimplifiedValue(const SDValue &Val) {
-    return static_cast<SimpleType>(Val.getNode());
+    return Val.getNode();
   }
 };
 
@@ -215,8 +221,8 @@ class SDUse {
   /// this operand.
   SDUse **Prev, *Next;
 
-  SDUse(const SDUse &U);          // Do not implement
-  void operator=(const SDUse &U); // Do not implement
+  SDUse(const SDUse &U) LLVM_DELETED_FUNCTION;
+  void operator=(const SDUse &U) LLVM_DELETED_FUNCTION;
 
 public:
   SDUse() : Val(), User(NULL), Prev(NULL), Next(NULL) {}
@@ -289,14 +295,8 @@ private:
 /// SDValues as if they were SDNode*'s.
 template<> struct simplify_type<SDUse> {
   typedef SDNode* SimpleType;
-  static SimpleType getSimplifiedValue(const SDUse &Val) {
-    return static_cast<SimpleType>(Val.getNode());
-  }
-};
-template<> struct simplify_type<const SDUse> {
-  typedef SDNode* SimpleType;
-  static SimpleType getSimplifiedValue(const SDUse &Val) {
-    return static_cast<SimpleType>(Val.getNode());
+  static SimpleType getSimplifiedValue(SDUse &Val) {
+    return Val.getNode();
   }
 };
 
@@ -524,7 +524,7 @@ public:
   /// NOTE: This is still very expensive. Use carefully.
   bool hasPredecessorHelper(const SDNode *N,
                             SmallPtrSet<const SDNode *, 32> &Visited,
-                            SmallVector<const SDNode *, 16> &Worklist) const; 
+                            SmallVector<const SDNode *, 16> &Worklist) const;
 
   /// getNumOperands - Return the number of values used by this operation.
   ///
@@ -594,6 +594,12 @@ public:
     return ValueList[ResNo];
   }
 
+  /// Return the type of a specified result as a simple type.
+  ///
+  MVT getSimpleValueType(unsigned ResNo) const {
+    return getValueType(ResNo).getSimpleVT();
+  }
+
   /// getValueSizeInBits - Returns MVT::getSizeInBits(getValueType(ResNo)).
   ///
   unsigned getValueSizeInBits(unsigned ResNo) const {
@@ -660,9 +666,6 @@ public:
   /// that appear multiple times wherever they are used.
   ///
   void dumprWithDepth(const SelectionDAG *G = 0, unsigned depth = 100) const;
-
-
-  static bool classof(const SDNode *) { return true; }
 
   /// Profile - Gather unique data for the node.
   ///
@@ -806,7 +809,12 @@ inline bool SDValue::hasOneUse() const {
 inline const DebugLoc SDValue::getDebugLoc() const {
   return Node->getDebugLoc();
 }
-
+inline void SDValue::dump() const {
+  return Node->dump();
+}
+inline void SDValue::dumpr() const {
+  return Node->dumpr();
+}
 // Define inline functions from the SDUse class.
 
 inline void SDUse::set(const SDValue &V) {
@@ -950,7 +958,12 @@ public:
   const MachinePointerInfo &getPointerInfo() const {
     return MMO->getPointerInfo();
   }
-  
+
+  /// getAddressSpace - Return the address space for the associated pointer
+  unsigned getAddressSpace() const {
+    return getPointerInfo().getAddrSpace();
+  }
+
   /// refineAlignment - Update this MemSDNode's MachineMemOperand information
   /// to reflect the alignment of NewMMO, if it has a greater alignment.
   /// This must only be used when the new alignment applies to all users of
@@ -965,7 +978,6 @@ public:
   }
 
   // Methods to support isa and dyn_cast
-  static bool classof(const MemSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     // For some targets, we lower some target intrinsics to a MemIntrinsicNode
     // with either an intrinsic or a target opcode.
@@ -1005,11 +1017,6 @@ class AtomicSDNode : public MemSDNode {
     SubclassData |= SynchScope << 12;
     assert(getOrdering() == Ordering && "Ordering encoding error!");
     assert(getSynchScope() == SynchScope && "Synch-scope encoding error!");
-
-    assert((readMem() || getOrdering() <= Monotonic) &&
-           "Acquire/Release MachineMemOperand must be a load!");
-    assert((writeMem() || getOrdering() <= Monotonic) &&
-           "Acquire/Release MachineMemOperand must be a store!");
   }
 
 public:
@@ -1055,7 +1062,6 @@ public:
   }
 
   // Methods to support isa and dyn_cast
-  static bool classof(const AtomicSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::ATOMIC_CMP_SWAP     ||
            N->getOpcode() == ISD::ATOMIC_SWAP         ||
@@ -1087,7 +1093,6 @@ public:
   }
 
   // Methods to support isa and dyn_cast
-  static bool classof(const MemIntrinsicSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     // We lower some target intrinsics to their target opcode
     // early a node with a target opcode can be of this class
@@ -1142,7 +1147,6 @@ public:
   }
   static bool isSplatMask(const int *Mask, EVT VT);
 
-  static bool classof(const ShuffleVectorSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::VECTOR_SHUFFLE;
   }
@@ -1166,7 +1170,6 @@ public:
   bool isNullValue() const { return Value->isNullValue(); }
   bool isAllOnesValue() const { return Value->isAllOnesValue(); }
 
-  static bool classof(const ConstantSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::Constant ||
            N->getOpcode() == ISD::TargetConstant;
@@ -1201,9 +1204,6 @@ public:
   /// have to duplicate its logic everywhere it's called.
   bool isExactlyValue(double V) const {
     bool ignored;
-    // convert is not supported on this type
-    if (&Value->getValueAPF().getSemantics() == &APFloat::PPCDoubleDouble)
-      return false;
     APFloat Tmp(V);
     Tmp.convert(Value->getValueAPF().getSemantics(),
                 APFloat::rmNearestTiesToEven, &ignored);
@@ -1213,7 +1213,6 @@ public:
 
   static bool isValueValidForType(EVT VT, const APFloat& Val);
 
-  static bool classof(const ConstantFPSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::ConstantFP ||
            N->getOpcode() == ISD::TargetConstantFP;
@@ -1235,7 +1234,6 @@ public:
   // Return the address space this GlobalAddress belongs to.
   unsigned getAddressSpace() const;
 
-  static bool classof(const GlobalAddressSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::GlobalAddress ||
            N->getOpcode() == ISD::TargetGlobalAddress ||
@@ -1255,7 +1253,6 @@ public:
 
   int getIndex() const { return FI; }
 
-  static bool classof(const FrameIndexSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::FrameIndex ||
            N->getOpcode() == ISD::TargetFrameIndex;
@@ -1275,7 +1272,6 @@ public:
   int getIndex() const { return JTI; }
   unsigned char getTargetFlags() const { return TargetFlags; }
 
-  static bool classof(const JumpTableSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::JumpTable ||
            N->getOpcode() == ISD::TargetJumpTable;
@@ -1296,7 +1292,7 @@ class ConstantPoolSDNode : public SDNode {
     : SDNode(isTarget ? ISD::TargetConstantPool : ISD::ConstantPool,
              DebugLoc(),
              getSDVTList(VT)), Offset(o), Alignment(Align), TargetFlags(TF) {
-    assert((int)Offset >= 0 && "Offset is too large");
+    assert(Offset >= 0 && "Offset is too large");
     Val.ConstVal = c;
   }
   ConstantPoolSDNode(bool isTarget, MachineConstantPoolValue *v,
@@ -1304,7 +1300,7 @@ class ConstantPoolSDNode : public SDNode {
     : SDNode(isTarget ? ISD::TargetConstantPool : ISD::ConstantPool,
              DebugLoc(),
              getSDVTList(VT)), Offset(o), Alignment(Align), TargetFlags(TF) {
-    assert((int)Offset >= 0 && "Offset is too large");
+    assert(Offset >= 0 && "Offset is too large");
     Val.MachineCPVal = v;
     Offset |= 1 << (sizeof(unsigned)*CHAR_BIT-1);
   }
@@ -1312,7 +1308,7 @@ public:
   
 
   bool isMachineConstantPoolEntry() const {
-    return (int)Offset < 0;
+    return Offset < 0;
   }
 
   const Constant *getConstVal() const {
@@ -1336,10 +1332,31 @@ public:
 
   Type *getType() const;
 
-  static bool classof(const ConstantPoolSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::ConstantPool ||
            N->getOpcode() == ISD::TargetConstantPool;
+  }
+};
+
+/// Completely target-dependent object reference.
+class TargetIndexSDNode : public SDNode {
+  unsigned char TargetFlags;
+  int Index;
+  int64_t Offset;
+  friend class SelectionDAG;
+public:
+
+  TargetIndexSDNode(int Idx, EVT VT, int64_t Ofs, unsigned char TF)
+    : SDNode(ISD::TargetIndex, DebugLoc(), getSDVTList(VT)),
+      TargetFlags(TF), Index(Idx), Offset(Ofs) {}
+public:
+
+  unsigned char getTargetFlags() const { return TargetFlags; }
+  int getIndex() const { return Index; }
+  int64_t getOffset() const { return Offset; }
+
+  static bool classof(const SDNode *N) {
+    return N->getOpcode() == ISD::TargetIndex;
   }
 };
 
@@ -1356,7 +1373,6 @@ public:
 
   MachineBasicBlock *getBasicBlock() const { return MBB; }
 
-  static bool classof(const BasicBlockSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::BasicBlock;
   }
@@ -1366,7 +1382,7 @@ public:
 /// BUILD_VECTORs.
 class BuildVectorSDNode : public SDNode {
   // These are constructed as SDNodes and then cast to BuildVectorSDNodes.
-  explicit BuildVectorSDNode();        // Do not implement
+  explicit BuildVectorSDNode() LLVM_DELETED_FUNCTION;
 public:
   /// isConstantSplat - Check if this is a constant splat, and if so, find the
   /// smallest element size that splats the vector.  If MinSplatBits is
@@ -1381,7 +1397,6 @@ public:
                        unsigned &SplatBitSize, bool &HasAnyUndefs,
                        unsigned MinSplatBits = 0, bool isBigEndian = false);
 
-  static inline bool classof(const BuildVectorSDNode *) { return true; }
   static inline bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::BUILD_VECTOR;
   }
@@ -1402,7 +1417,6 @@ public:
   /// getValue - return the contained Value.
   const Value *getValue() const { return V; }
 
-  static bool classof(const SrcValueSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::SRCVALUE;
   }
@@ -1417,7 +1431,6 @@ public:
   
   const MDNode *getMD() const { return MD; }
   
-  static bool classof(const MDNodeSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::MDNODE_SDNODE;
   }
@@ -1434,7 +1447,6 @@ public:
 
   unsigned getReg() const { return Reg; }
 
-  static bool classof(const RegisterSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::Register;
   }
@@ -1451,7 +1463,6 @@ public:
 
   const uint32_t *getRegMask() const { return RegMask; }
 
-  static bool classof(const RegisterMaskSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::RegisterMask;
   }
@@ -1459,18 +1470,19 @@ public:
 
 class BlockAddressSDNode : public SDNode {
   const BlockAddress *BA;
+  int64_t Offset;
   unsigned char TargetFlags;
   friend class SelectionDAG;
   BlockAddressSDNode(unsigned NodeTy, EVT VT, const BlockAddress *ba,
-                     unsigned char Flags)
+                     int64_t o, unsigned char Flags)
     : SDNode(NodeTy, DebugLoc(), getSDVTList(VT)),
-             BA(ba), TargetFlags(Flags) {
+             BA(ba), Offset(o), TargetFlags(Flags) {
   }
 public:
   const BlockAddress *getBlockAddress() const { return BA; }
+  int64_t getOffset() const { return Offset; }
   unsigned char getTargetFlags() const { return TargetFlags; }
 
-  static bool classof(const BlockAddressSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::BlockAddress ||
            N->getOpcode() == ISD::TargetBlockAddress;
@@ -1488,7 +1500,6 @@ class EHLabelSDNode : public SDNode {
 public:
   MCSymbol *getLabel() const { return Label; }
 
-  static bool classof(const EHLabelSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::EH_LABEL;
   }
@@ -1508,7 +1519,6 @@ public:
   const char *getSymbol() const { return Symbol; }
   unsigned char getTargetFlags() const { return TargetFlags; }
 
-  static bool classof(const ExternalSymbolSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::ExternalSymbol ||
            N->getOpcode() == ISD::TargetExternalSymbol;
@@ -1526,7 +1536,6 @@ public:
 
   ISD::CondCode get() const { return Condition; }
 
-  static bool classof(const CondCodeSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::CONDCODE;
   }
@@ -1546,7 +1555,6 @@ class CvtRndSatSDNode : public SDNode {
 public:
   ISD::CvtCode getCvtCode() const { return CvtCode; }
 
-  static bool classof(const CvtRndSatSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::CONVERT_RNDSAT;
   }
@@ -1565,7 +1573,6 @@ public:
 
   EVT getVT() const { return ValueType; }
 
-  static bool classof(const VTSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::VALUETYPE;
   }
@@ -1609,7 +1616,6 @@ public:
   /// isUnindexed - Return true if this is NOT a pre/post inc/dec load/store.
   bool isUnindexed() const { return getAddressingMode() == ISD::UNINDEXED; }
 
-  static bool classof(const LSBaseSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::LOAD ||
            N->getOpcode() == ISD::STORE;
@@ -1641,7 +1647,6 @@ public:
   const SDValue &getBasePtr() const { return getOperand(1); }
   const SDValue &getOffset() const { return getOperand(2); }
 
-  static bool classof(const LoadSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::LOAD;
   }
@@ -1672,7 +1677,6 @@ public:
   const SDValue &getBasePtr() const { return getOperand(2); }
   const SDValue &getOffset() const { return getOperand(3); }
 
-  static bool classof(const StoreSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->getOpcode() == ISD::STORE;
   }
@@ -1713,7 +1717,6 @@ public:
     MemRefsEnd = NewMemRefsEnd;
   }
 
-  static bool classof(const MachineSDNode *) { return true; }
   static bool classof(const SDNode *N) {
     return N->isMachineOpcode();
   }
@@ -1721,10 +1724,10 @@ public:
 
 class SDNodeIterator : public std::iterator<std::forward_iterator_tag,
                                             SDNode, ptrdiff_t> {
-  SDNode *Node;
+  const SDNode *Node;
   unsigned Operand;
 
-  SDNodeIterator(SDNode *N, unsigned Op) : Node(N), Operand(Op) {}
+  SDNodeIterator(const SDNode *N, unsigned Op) : Node(N), Operand(Op) {}
 public:
   bool operator==(const SDNodeIterator& x) const {
     return Operand == x.Operand;
@@ -1755,8 +1758,8 @@ public:
     return Operand - Other.Operand;
   }
 
-  static SDNodeIterator begin(SDNode *N) { return SDNodeIterator(N, 0); }
-  static SDNodeIterator end  (SDNode *N) {
+  static SDNodeIterator begin(const SDNode *N) { return SDNodeIterator(N, 0); }
+  static SDNodeIterator end  (const SDNode *N) {
     return SDNodeIterator(N, N->getNumOperands());
   }
 

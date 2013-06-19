@@ -50,6 +50,12 @@
 #include <limits.h>
 #endif
 
+// Both stdio.h and cstdio are included via different pathes and
+// stdcxx's cstdio doesn't include stdio.h, so it doesn't #undef the macros
+// either.
+#undef ferror
+#undef feof
+
 // For GNU Hurd
 #if defined(__GNU__) && !defined(PATH_MAX)
 # define PATH_MAX 4096
@@ -411,16 +417,22 @@ retry_random_path:
       RandomPath[i] = "0123456789abcdef"[sys::Process::GetRandomNumber() & 15];
   }
 
+  // Make sure we don't fall into an infinite loop by constantly trying
+  // to create the parent path.
+  bool TriedToCreateParent = false;
+
   // Try to open + create the file.
 rety_open_create:
   int RandomFD = ::open(RandomPath.c_str(), O_RDWR | O_CREAT | O_EXCL, mode);
   if (RandomFD == -1) {
+    int SavedErrno = errno;
     // If the file existed, try again, otherwise, error.
-    if (errno == errc::file_exists)
+    if (SavedErrno == errc::file_exists)
       goto retry_random_path;
-    // The path prefix doesn't exist.
-    if (errno == errc::no_such_file_or_directory) {
-      StringRef p(RandomPath.begin(), RandomPath.size());
+    // If path prefix doesn't exist, try to create it.
+    if (SavedErrno == errc::no_such_file_or_directory && !TriedToCreateParent) {
+      TriedToCreateParent = true;
+      StringRef p(RandomPath);
       SmallString<64> dir_to_create;
       for (path::const_iterator i = path::begin(p),
                                 e = --path::end(p); i != e; ++i) {
@@ -433,13 +445,15 @@ rety_open_create:
                                (*i)[1] == '/' &&
                                (*i)[2] != '/')
             return make_error_code(errc::no_such_file_or_directory);
-          if (::mkdir(dir_to_create.c_str(), 0700) == -1)
+          if (::mkdir(dir_to_create.c_str(), 0700) == -1 &&
+              errno != errc::file_exists)
             return error_code(errno, system_category());
         }
       }
       goto rety_open_create;
     }
-    return error_code(errno, system_category());
+
+    return error_code(SavedErrno, system_category());
   }
 
    // Make the path absolute.
@@ -457,6 +471,121 @@ rety_open_create:
 
   result_fd = RandomFD;
   return error_code::success();
+}
+
+error_code mapped_file_region::init(int FD, bool CloseFD, uint64_t Offset) {
+  AutoFD ScopedFD(FD);
+  if (!CloseFD)
+    ScopedFD.take();
+
+  // Figure out how large the file is.
+  struct stat FileInfo;
+  if (fstat(FD, &FileInfo) == -1)
+    return error_code(errno, system_category());
+  uint64_t FileSize = FileInfo.st_size;
+
+  if (Size == 0)
+    Size = FileSize;
+  else if (FileSize < Size) {
+    // We need to grow the file.
+    if (ftruncate(FD, Size) == -1)
+      return error_code(errno, system_category());
+  }
+
+  int flags = (Mode == readwrite) ? MAP_SHARED : MAP_PRIVATE;
+  int prot = (Mode == readonly) ? PROT_READ : (PROT_READ | PROT_WRITE);
+#ifdef MAP_FILE
+  flags |= MAP_FILE;
+#endif
+  Mapping = ::mmap(0, Size, prot, flags, FD, Offset);
+  if (Mapping == MAP_FAILED)
+    return error_code(errno, system_category());
+  return error_code::success();
+}
+
+mapped_file_region::mapped_file_region(const Twine &path,
+                                       mapmode mode,
+                                       uint64_t length,
+                                       uint64_t offset,
+                                       error_code &ec)
+  : Mode(mode)
+  , Size(length)
+  , Mapping() {
+  // Make sure that the requested size fits within SIZE_T.
+  if (length > std::numeric_limits<size_t>::max()) {
+    ec = make_error_code(errc::invalid_argument);
+    return;
+  }
+
+  SmallString<128> path_storage;
+  StringRef name = path.toNullTerminatedStringRef(path_storage);
+  int oflags = (mode == readonly) ? O_RDONLY : O_RDWR;
+  int ofd = ::open(name.begin(), oflags);
+  if (ofd == -1) {
+    ec = error_code(errno, system_category());
+    return;
+  }
+
+  ec = init(ofd, true, offset);
+  if (ec)
+    Mapping = 0;
+}
+
+mapped_file_region::mapped_file_region(int fd,
+                                       bool closefd,
+                                       mapmode mode,
+                                       uint64_t length,
+                                       uint64_t offset,
+                                       error_code &ec)
+  : Mode(mode)
+  , Size(length)
+  , Mapping() {
+  // Make sure that the requested size fits within SIZE_T.
+  if (length > std::numeric_limits<size_t>::max()) {
+    ec = make_error_code(errc::invalid_argument);
+    return;
+  }
+
+  ec = init(fd, closefd, offset);
+  if (ec)
+    Mapping = 0;
+}
+
+mapped_file_region::~mapped_file_region() {
+  if (Mapping)
+    ::munmap(Mapping, Size);
+}
+
+#if LLVM_HAS_RVALUE_REFERENCES
+mapped_file_region::mapped_file_region(mapped_file_region &&other)
+  : Mode(other.Mode), Size(other.Size), Mapping(other.Mapping) {
+  other.Mapping = 0;
+}
+#endif
+
+mapped_file_region::mapmode mapped_file_region::flags() const {
+  assert(Mapping && "Mapping failed but used anyway!");
+  return Mode;
+}
+
+uint64_t mapped_file_region::size() const {
+  assert(Mapping && "Mapping failed but used anyway!");
+  return Size;
+}
+
+char *mapped_file_region::data() const {
+  assert(Mapping && "Mapping failed but used anyway!");
+  assert(Mode != readonly && "Cannot get non const data for readonly mapping!");
+  return reinterpret_cast<char*>(Mapping);
+}
+
+const char *mapped_file_region::const_data() const {
+  assert(Mapping && "Mapping failed but used anyway!");
+  return reinterpret_cast<const char*>(Mapping);
+}
+
+int mapped_file_region::alignment() {
+  return process::get_self()->page_size();
 }
 
 error_code detail::directory_iterator_construct(detail::DirIterState &it,

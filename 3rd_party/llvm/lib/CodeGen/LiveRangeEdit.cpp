@@ -12,16 +12,16 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "regalloc"
-#include "VirtRegMap.h"
+#include "llvm/CodeGen/LiveRangeEdit.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/CalcSpillWeights.h"
 #include "llvm/CodeGen/LiveIntervalAnalysis.h"
-#include "llvm/CodeGen/LiveRangeEdit.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/Target/TargetInstrInfo.h"
+#include "llvm/CodeGen/VirtRegMap.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetInstrInfo.h"
 
 using namespace llvm;
 
@@ -77,7 +77,7 @@ bool LiveRangeEdit::anyRematerializable(AliasAnalysis *aa) {
 /// OrigIdx are also available with the same value at UseIdx.
 bool LiveRangeEdit::allUsesAvailableAt(const MachineInstr *OrigMI,
                                        SlotIndex OrigIdx,
-                                       SlotIndex UseIdx) {
+                                       SlotIndex UseIdx) const {
   OrigIdx = OrigIdx.getRegSlot(true);
   UseIdx = UseIdx.getRegSlot(true);
   for (unsigned i = 0, e = OrigMI->getNumOperands(); i != e; ++i) {
@@ -87,7 +87,7 @@ bool LiveRangeEdit::allUsesAvailableAt(const MachineInstr *OrigMI,
 
     // We can't remat physreg uses, unless it is a constant.
     if (TargetRegisterInfo::isPhysicalRegister(MO.getReg())) {
-      if (MRI.isConstantPhysReg(MO.getReg(), VRM->getMachineFunction()))
+      if (MRI.isConstantPhysReg(MO.getReg(), *OrigMI->getParent()->getParent()))
         continue;
       return false;
     }
@@ -96,6 +96,13 @@ bool LiveRangeEdit::allUsesAvailableAt(const MachineInstr *OrigMI,
     const VNInfo *OVNI = li.getVNInfoAt(OrigIdx);
     if (!OVNI)
       continue;
+
+    // Don't allow rematerialization immediately after the original def.
+    // It would be incorrect if OrigMI redefines the register.
+    // See PR14098.
+    if (SlotIndex::isSameInstr(OrigIdx, UseIdx))
+      return false;
+
     if (OVNI != li.getVNInfoAt(UseIdx))
       return false;
   }
@@ -239,6 +246,7 @@ void LiveRangeEdit::eliminateDeadDefs(SmallVectorImpl<MachineInstr*> &Dead,
 
       // Collect virtual registers to be erased after MI is gone.
       SmallVector<unsigned, 8> RegsToErase;
+      bool ReadsPhysRegs = false;
 
       // Check for live intervals that may shrink
       for (MachineInstr::mop_iterator MOI = MI->operands_begin(),
@@ -246,8 +254,12 @@ void LiveRangeEdit::eliminateDeadDefs(SmallVectorImpl<MachineInstr*> &Dead,
         if (!MOI->isReg())
           continue;
         unsigned Reg = MOI->getReg();
-        if (!TargetRegisterInfo::isVirtualRegister(Reg))
+        if (!TargetRegisterInfo::isVirtualRegister(Reg)) {
+          // Check if MI reads any unreserved physregs.
+          if (Reg && MOI->readsReg() && !MRI.isReserved(Reg))
+            ReadsPhysRegs = true;
           continue;
+        }
         LiveInterval &LI = LIS.getInterval(Reg);
 
         // Shrink read registers, unless it is likely to be expensive and
@@ -271,11 +283,30 @@ void LiveRangeEdit::eliminateDeadDefs(SmallVectorImpl<MachineInstr*> &Dead,
         }
       }
 
-      if (TheDelegate)
-        TheDelegate->LRE_WillEraseInstruction(MI);
-      LIS.RemoveMachineInstrFromMaps(MI);
-      MI->eraseFromParent();
-      ++NumDCEDeleted;
+      // Currently, we don't support DCE of physreg live ranges. If MI reads
+      // any unreserved physregs, don't erase the instruction, but turn it into
+      // a KILL instead. This way, the physreg live ranges don't end up
+      // dangling.
+      // FIXME: It would be better to have something like shrinkToUses() for
+      // physregs. That could potentially enable more DCE and it would free up
+      // the physreg. It would not happen often, though.
+      if (ReadsPhysRegs) {
+        MI->setDesc(TII.get(TargetOpcode::KILL));
+        // Remove all operands that aren't physregs.
+        for (unsigned i = MI->getNumOperands(); i; --i) {
+          const MachineOperand &MO = MI->getOperand(i-1);
+          if (MO.isReg() && TargetRegisterInfo::isPhysicalRegister(MO.getReg()))
+            continue;
+          MI->RemoveOperand(i-1);
+        }
+        DEBUG(dbgs() << "Converted physregs to:\t" << *MI);
+      } else {
+        if (TheDelegate)
+          TheDelegate->LRE_WillEraseInstruction(MI);
+        LIS.RemoveMachineInstrFromMaps(MI);
+        MI->eraseFromParent();
+        ++NumDCEDeleted;
+      }
 
       // Erase any virtregs that are now empty and unused. There may be <undef>
       // uses around. Keep the empty live range in that case.
