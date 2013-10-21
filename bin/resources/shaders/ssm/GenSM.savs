@@ -1,8 +1,6 @@
 float4x4 wvpMatrix; 
-float4   eyePos; 
-float4	 lightPos; 
 
-float4 main(float4 pos: POSITION): SV_POSITION
+float4 main(float4 pos: POSITION): SV_Position
 {
-	return mul(pos, wvpMatrix); 
+	return mul(pos, wvpMatrix);
 } 
