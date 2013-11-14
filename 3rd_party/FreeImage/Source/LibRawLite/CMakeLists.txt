@@ -25,7 +25,12 @@ set( LIBRAWLITE_SOURCES
 
 #ADD_DEFINITIONS(-DPNG_BUILD_DLL)
 
-add_library ( LibRawLite_s STATIC ${LIBRAWLITE_SOURCES} )
+
+	add_library ( LibRawLite_s STATIC ${LIBRAWLITE_SOURCES} )
+	
+IF(MINGW)
+	target_link_libraries(LibRawLite_s ws2_32)
+ENDIF(MINGW)
 
   IF(FREEIMAGE_BUILD_STATIC)
     INSTALL(TARGETS 
