@@ -1,4 +1,4 @@
-/* 
+/*
   Copyright 2008-2010 LibRaw LLC (info@libraw.org)
 
 LibRaw is free software; you can redistribute it and/or modify
@@ -591,14 +591,14 @@ void CLASS canon_compressed_load_raw()
         if (irow >= height) continue; // if row above image area than irow is VERY positive :)
 
         // only margins!
-        for (col=0; col < left_margin; col++) 
+        for (col=0; col < left_margin; col++)
             {
                 icol = col - left_margin;
                 c = FC(irow,icol);
                 if (icol >= width && col > 1 && (unsigned) (col-left_margin+2) > width+3)
                     cblack[c] += (cblack[4+c]++,pixel[r*raw_width+col]);
             }
-        for (col=width+left_margin; col < raw_width; col++) 
+        for (col=width+left_margin; col < raw_width; col++)
             {
                 icol = col - left_margin;
                 c = FC(irow,icol);
@@ -856,7 +856,7 @@ void CLASS lossless_jpeg_load_raw()
           // not sliced
           slicesW[slicesWcnt++] = raw_width; // safe fallback
       }
-       
+
   slices = slicesWcnt * jh.high;
   offset = (unsigned*)calloc(slices+1,sizeof(offset[0]));
 
@@ -864,7 +864,7 @@ void CLASS lossless_jpeg_load_raw()
       {
           offset[slice] = (t_x + t_y * raw_width)| (t_s<<28);
           if((offset[slice] & 0x0fffffff) >= raw_width * raw_height)
-              throw LIBRAW_EXCEPTION_IO_BADFILE; 
+              throw LIBRAW_EXCEPTION_IO_BADFILE;
           t_y++;
           if(t_y == jh.high)
               {
@@ -874,7 +874,7 @@ void CLASS lossless_jpeg_load_raw()
       }
   offset[slices] = offset[slices-1];
   slice = 1; // next slice
-  pixno = offset[0]; 
+  pixno = offset[0];
   pixelsInSlice = slicesW[0];
 #endif
 
@@ -911,7 +911,7 @@ void CLASS lossless_jpeg_load_raw()
       }
 #else
       // new fast one, but for data_size defined only (i.e. new CR2 format, not 1D/1Ds)
-      if(buf) 
+      if(buf)
           {
               if(!(load_flags & 1))
                   row = pixno/raw_width;
@@ -946,19 +946,19 @@ void CLASS lossless_jpeg_load_raw()
               if(row >= 0 && row < raw_height && col >= 0 && col < raw_width)
                   RBAYER(row,col) = val;
           }
-      else 
+      else
           RBAYER(row,col) = val;
 
-      if ((unsigned) (row-top_margin) < height) 
+      if ((unsigned) (row-top_margin) < height)
           {
               // within image height
-              if ((unsigned) (col-left_margin) < width) 
+              if ((unsigned) (col-left_margin) < width)
                   {
                       // within image area, save min
                       if(save_min)
                           if (min > val) min = val;
-                  } 
-              else if (col > 1 && (unsigned) (col-left_margin+2) > width+3) 
+                  }
+              else if (col > 1 && (unsigned) (col-left_margin+2) > width+3)
                   {
                       c = FC(row-top_margin,col-left_margin);
                       cblack[c] += (cblack[4+c]++,val);
@@ -1077,7 +1077,7 @@ next: pix[0] = rp[0] + rp[2];
       pix[2] = rp[0] + ((29040*rp[1] -   101*rp[2]) >> 14);
     }
 #endif
-    FORC3 
+    FORC3
         rp[c] = CLIP(pix[c] * sraw_mul[c] >> 10);
   }
 #ifdef LIBRAW_LIBRARY_BUILD
@@ -1251,7 +1251,7 @@ void CLASS pentax_load_raw()
               unsigned val = hpred[col & 1];
 
 #ifndef LIBRAW_LIBRARY_BUILD
-              if ((unsigned) (row-top_margin) < height && 
+              if ((unsigned) (row-top_margin) < height &&
                   (unsigned)(col-left_margin) < width)
                   BAYER(row-top_margin,col-left_margin) = val;
 #else
@@ -1792,7 +1792,7 @@ unsigned CLASS ph1_bithuff (int nbits, ushort *huff)
 {
 #ifndef LIBRAW_NOTHREADS
 #define bitbuf tls->ph1_bits.bitbuf
-#define vbits  tls->ph1_bits.vbits    
+#define vbits  tls->ph1_bits.vbits
 #else
   static UINT64 bitbuf=0;
   static int vbits=0;
@@ -1878,7 +1878,7 @@ void CLASS phase_one_load_raw_c()
 	if (i > 0) BAYER(row-top_margin,col) = i;
       }
 #else
-    for (col=0; col < raw_width; col++) 
+    for (col=0; col < raw_width; col++)
         {
             i = (pixel[col] << 2);
             RBAYER(row,col) = i;
@@ -2054,7 +2054,7 @@ void CLASS packed_load_raw()
   fseek (ifp, top_margin*bwide, SEEK_CUR);
   bite = 8 + (load_flags & 24);
   half = (height+1) >> 1;
-  for (irow=0; irow < height; irow++) 
+  for (irow=0; irow < height; irow++)
   {
     row = irow;
     if (load_flags & 2 &&
@@ -2170,7 +2170,7 @@ unsigned CLASS pana_bits (int nbits)
 {
 #ifndef LIBRAW_NOTHREADS
 #define buf tls->pana_bits.buf
-#define vbits tls->pana_bits.vbits   
+#define vbits tls->pana_bits.vbits
 #else
   static uchar buf[0x4000];
   static int vbits;
@@ -2967,7 +2967,7 @@ void CLASS sony_arw_load_raw()
       buf = ifp->make_byte_buffer(data_size);
   else
       getbits(-1);
-      
+
   LibRaw_bit_buffer bits;
   bits.reset();
 #else
@@ -3043,7 +3043,7 @@ void CLASS sony_arw2_load_raw()
   }
   free (data);
 }
- 
+
 #define HOLE(row) ((holes >> (((row) - raw_height) & 7)) & 1)
 
 /* Kudos to Rich Taylor for figuring out SMaL's compression algorithm. */
@@ -3533,7 +3533,7 @@ void CLASS wavelet_denoise()
   temp = fimg + size*3;
   if ((nc = colors) == 3 && filters) nc++;
 #ifdef LIBRAW_LIBRARY_BUILD
-#pragma omp parallel default(shared) private(i,col,row,thold,lev,lpass,hpass,temp,c) firstprivate(scale,size) 
+#pragma omp parallel default(shared) private(i,col,row,thold,lev,lpass,hpass,temp,c) firstprivate(scale,size)
 #endif
   {
       temp = (float*)malloc( (iheight + iwidth) * sizeof *fimg);
@@ -4412,7 +4412,7 @@ void CLASS ahd_interpolate()
 #ifdef LIBRAW_USE_OPENMP
         if(0== omp_get_thread_num())
 #endif
-           if(callbacks.progress_cb) {                                     
+           if(callbacks.progress_cb) {
                int rr = (*callbacks.progress_cb)(callbacks.progresscb_data,LIBRAW_PROGRESS_INTERPOLATE,top-2,height-7);
                if(rr)
                    terminate_flag = 1;
@@ -4427,7 +4427,7 @@ void CLASS ahd_interpolate()
     }
     free (buffer);
   }
-#ifdef LIBRAW_LIBRARY_BUILD 
+#ifdef LIBRAW_LIBRARY_BUILD
   if(terminate_flag)
       throw LIBRAW_EXCEPTION_CANCELLED_BY_CALLBACK;
 #endif
@@ -6039,7 +6039,7 @@ void CLASS parse_external_jpeg()
     }
   }
 #else
-  if (strcmp (jname, ifname)) 
+  if (strcmp (jname, ifname))
       {
           if(!ifp->subfile_open(jname))
               {
@@ -7279,7 +7279,7 @@ void CLASS adobe_coeff (const char *p_make, const char *p_model)
       if (table[i].trans[0]) {
         for (j=0; j < 12; j++)
 #ifdef LIBRAW_LIBRARY_BUILD
-          imgdata.color.cam_xyz[0][j] = 
+          imgdata.color.cam_xyz[0][j] =
 #endif
 	  cam_xyz[0][j] = table[i].trans[j] / 10000.0;
       cam_xyz_coeff (cam_xyz);
@@ -9357,7 +9357,7 @@ void CLASS tiff_head (struct tiff_hdr *th, int full)
   strncpy (th->t_desc, desc, 512);
   strncpy (th->t_make, make, 64);
   strncpy (th->t_model, model, 64);
-  strcpy (th->soft, "dcraw v"DCRAW_VERSION);
+  strcpy (th->soft, "dcraw v" DCRAW_VERSION);
   t = localtime (&timestamp);
   sprintf (th->date, "%04d:%02d:%02d %02d:%02d:%02d",
       t->tm_year+1900,t->tm_mon+1,t->tm_mday,t->tm_hour,t->tm_min,t->tm_sec);
