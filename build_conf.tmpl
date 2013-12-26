@@ -1,0 +1,57 @@
+################################################
+# !!!! DO NOT DELETE ANY FIELD OF THIS FILE !!!!
+################################################
+
+# ----------------------------------------------------------------
+# Notes of parameters:
+#   boost_root:
+#      The root directory of boost.
+#
+#	   Only support boost 1.53 and later.
+#
+#   build_root:
+#      The root directory for build and intermediate files.
+#
+#   install_root:
+#      Root directory to installing all output of binaries.
+#      <install_root>/bin is for DLL and executable files,
+#      <install_root>/lib is directory for all static libraries.
+#
+#   arch:
+#      Target architecture.
+#      Available values are:
+#            x86
+#            x64
+#
+#   toolset:
+#      Toolset for compiling.
+#      Available values are:
+#            msvc-<major>.<minor>     for e.g.: 'msvc-10.0', 'msvc-11.0'
+#            gcc
+#
+#	   Supported compilers:
+#			 MSVC 10, MSVC 11				
+#			 MinGW (32bit) 4.7 and later	(with 'gcc' toolset)
+#	
+#	toolset_dir:
+#		If you don't use MSVC as your compiler,
+#		or your MinGW/gcc compiler is not located in environment variable "PATH",
+#		please specify toolset_dir for your compiler which includes the gcc/g++.exe.
+#		Additional, if you installed MinGW in C:\MinGW\, script could find it without this variable.
+#
+#   config:
+#      Build configuration.
+#      It could be one of 'Debug', 'Release', 'MinSizeRel', 'RelWithDebInfo'.
+#   
+#   cmake:
+#      Path which include CMAKE executable file.
+# --------------------------------------------------------------
+
+boost_root		= 'E:/Programming/Library/boost_1_53_0'
+build_root		= '.\\build'
+install_root	= './'
+arch			= 'x86'
+toolset			= 'gcc'
+toolset_dir		= 'D:/Software/CodeBlocks/MinGW/bin/'
+config			= 'RelWithDebInfo'
+cmake			= 'D:/Software/CMake 2.8/bin/cmake.exe'		
