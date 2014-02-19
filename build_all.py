@@ -93,7 +93,15 @@ def make_boost(proj):
 	if toolset.short_compiler_name() == 'vc':
 		defs = ["_CRT_SECURE_NO_DEPRECATE", "_SCL_SECURE_NO_DEPRECATE"]
 		cxxflags = ["-wd4819", "-wd4910"]
-
+		
+	#bjam toolset stagedir address-model defs cxxflags libs options
+	bjam_executable = None
+	if systems.current() == systems.win32:
+		bjam_executable = 'bjam'
+	elif systems.current() == systems.linux:
+		bjam_executable = './bjam'
+	else:
+		report_error("Unsupported OS.")
 	#configs to cmd
 	libs_cmd = ["--with-%s" % lib for lib in libs]
 	defs_cmd = []
@@ -105,17 +113,9 @@ def make_boost(proj):
 
 	toolset_cmd = "--toolset=%s" % toolset.boost_name()
 	stage_cmd = '--stagedir=%s' % stage
-
-	#bjam toolset stagedir address-model defs cxxflags libs options
-	bjam_executable = None
-	if systems.current() == systems.win32:
-		bjam_executable = 'bjam'
-	elif systems.current() == systems.linux:
-		bjam_executable = './bjam'
-	else:
-		report_error("Unsupported OS.")
 		
-	boost_cmd = [bjam_executable, toolset_cmd, stage_cmd, address_model] + defs_cmd + cxxflags_cmd + libs_cmd + options
+	boost_cmd = [bjam_executable, toolset_cmd, stage_cmd, address_model] \
+	            + defs_cmd + cxxflags_cmd + libs_cmd + options + proj.boost_configs()
 	report_info( 'Executing: %s' % boost_cmd )
 
 	env = os.environ
@@ -156,10 +156,10 @@ def config_and_make_cmake_project(project_name, additional_params, source_dir, b
 		if systems.current() == systems.win32:
 			conf_cmd.add_native_command('@set PATH=%s;%%PATH%%' % proj.customized_toolset_dir())
 		elif systems.current() == systems.linux:
-			conf_cmd.add_native_command('PATH=%s:%%PATH%%' % proj.customized_toolset_dir())
+			conf_cmd.add_native_command('PATH=%s:$PATH' % proj.customized_toolset_dir())
 		else:
 			report_error("Unsupported OS.")
-	conf_cmd.add_execmd_with_error_exit('"%s" -G "%s" %s %s ' % (proj.cmake_exe(), proj.generator(), params_cmd, source_dir))
+	conf_cmd.add_execmd_with_error_exit('"%s" -G "%s" %s %s' % (proj.cmake_exe(), proj.generator(), params_cmd, source_dir))
 	
 	if conf_cmd.execute() != 0:
 		report_error("%s configure failed." % project_name)
@@ -211,7 +211,10 @@ def config_and_make_salvia(proj):
 	defs = dict()
 	defs["SALVIA_BOOST_DIR"] = ("PATH", proj.boost_root())
 	defs["PYTHON_EXECUTABLE"] = ("PATH", sys.executable)
-	defs["SALVIA_BOOST_LIB_DIR"] = ("PATH", proj.boost_lib_dir() )
+	if proj.toolset().short_compiler_name() == 'vc':
+		defs["SALVIA_BOOST_LIB_DIR"] = ("PATH", proj.boost_lib_dir_in_msvc())
+	else:
+		defs["SALVIA_BOOST_LIB_DIR"] = ("PATH", proj.boost_lib_dir())
 	if proj.toolset().short_compiler_name() == "vc":
 		defs["SALVIA_FREEIMAGE_DIR"] = ( "PATH", proj.freeimage_install_in_msvc() )
 		defs["SALVIA_LLVM_INSTALL_DIR"] = ("PATH", proj.llvm_install_in_msvc() )
@@ -267,8 +270,6 @@ def install_prebuild_binaries(proj):
 	for f in files:
 		name, ext = os.path.splitext(f)
 		if ext != dynamic_lib_ext:
-			continue
-		if ('-gd-' in name or '-d-' in name) != (proj.config_name() == "Debug"):
 			continue
 		if not proj.toolset().boost_lib_name() in name:
 			continue
