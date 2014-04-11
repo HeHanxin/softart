@@ -1,4 +1,23 @@
-
+/*===-- include/Support/DataTypes.h - Define fixed size types -----*- C -*-===*\
+|*                                                                            *|
+|*                     The LLVM Compiler Infrastructure                       *|
+|*                                                                            *|
+|* This file is distributed under the University of Illinois Open Source      *|
+|* License. See LICENSE.TXT for details.                                      *|
+|*                                                                            *|
+|*===----------------------------------------------------------------------===*|
+|*                                                                            *|
+|* This file contains definitions to figure out the size of _HOST_ data types.*|
+|* This file is important because different host OS's define different macros,*|
+|* which makes portability tough.  This file exports the following            *|
+|* definitions:                                                               *|
+|*                                                                            *|
+|*   [u]int(32|64)_t : typedefs for signed and unsigned 32/64 bit system types*|
+|*   [U]INT(8|16|32|64)_(MIN|MAX) : Constants for the min and max values.     *|
+|*                                                                            *|
+|* No library is required when using these functions.                         *|
+|*                                                                            *|
+|*===----------------------------------------------------------------------===*/
 
 /* Please leave this file C-compatible. */
 
@@ -7,12 +26,10 @@
 #ifndef SUPPORT_DATATYPES_H
 #define SUPPORT_DATATYPES_H
 
-#cmakedefine HAVE_SYS_TYPES_H ${HAVE_SYS_TYPES_H}
 #cmakedefine HAVE_INTTYPES_H ${HAVE_INTTYPES_H}
 #cmakedefine HAVE_STDINT_H ${HAVE_STDINT_H}
 #cmakedefine HAVE_UINT64_T ${HAVE_UINT64_T}
 #cmakedefine HAVE_U_INT64_T ${HAVE_U_INT64_T}
-#cmakedefine HAVE_BOOST_SYS_TYPES ${HAVE_BOOST_SYS_TYPES}
 
 #ifdef __cplusplus
 #include <cmath>
@@ -36,9 +53,7 @@
 #endif
 
 /* Note that <inttypes.h> includes <stdint.h>, if this is a C99 system. */
-#ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
-#endif
 
 #ifdef HAVE_INTTYPES_H
 #include <inttypes.h>
@@ -62,23 +77,6 @@ typedef u_int64_t uint64_t;
 #endif
 
 #else /* _MSC_VER */
-#	if defined( __cplusplus ) && defined(HAVE_BOOST_SYS_TYPES) && HAVE_BOOST_SYS_TYPES
-
-#	include <boost/cstdint.hpp>
-	using boost::int8_t;
-	using boost::int16_t;
-	using boost::int32_t;
-	using boost::int64_t;
-
-	using boost::uint8_t;
-	using boost::uint16_t;
-	using boost::uint32_t;
-	using boost::uint64_t;
-
-	typedef boost::int32_t ssize_t;
-
-#	endif
-
 /* Visual C++ doesn't provide standard integer headers, but it does provide
    built-in data types. */
 #ifdef HAVE_STDINT_H
@@ -100,7 +98,11 @@ typedef short int16_t;
 typedef unsigned short uint16_t;
 typedef signed char int8_t;
 typedef unsigned char uint8_t;
-typedef signed int ssize_t;
+#if defined(_WIN64)
+  typedef signed __int64 ssize_t;
+#else
+  typedef signed int ssize_t;
+#endif
 #ifndef INT8_MAX
 # define INT8_MAX 127
 #endif
