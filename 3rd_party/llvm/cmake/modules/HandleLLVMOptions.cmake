@@ -8,6 +8,8 @@ include(CheckCXXCompilerFlag)
 
 if( CMAKE_COMPILER_IS_GNUCXX )
   set(LLVM_COMPILER_IS_GCC_COMPATIBLE ON)
+elseif( MSVC )
+  set(LLVM_COMPILER_IS_GCC_COMPATIBLE OFF)
 elseif( "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" )
   set(LLVM_COMPILER_IS_GCC_COMPATIBLE ON)
 endif()
@@ -17,13 +19,18 @@ if( LLVM_ENABLE_ASSERTIONS )
   if( NOT MSVC )
     add_definitions( -D_DEBUG )
   endif()
-  # On Release builds cmake automatically defines NDEBUG, so we
+  # On non-Debug builds cmake automatically defines NDEBUG, so we
   # explicitly undefine it:
-  if( uppercase_CMAKE_BUILD_TYPE STREQUAL "RELEASE" )
+  if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
     add_definitions( -UNDEBUG )
     # Also remove /D NDEBUG to avoid MSVC warnings about conflicting defines.
-    string (REGEX REPLACE "(^| )[/-]D *NDEBUG($| )" " "
+    set(REGEXP_NDEBUG "(^| )[/-]D *NDEBUG($| )")
+    string (REGEX REPLACE "${REGEXP_NDEBUG}" " "
       CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+    string (REGEX REPLACE "${REGEXP_NDEBUG}" " "
+      CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+    string (REGEX REPLACE "${REGEXP_NDEBUG}" " "
+      CMAKE_CXX_FLAGS_MINSIZEREL "${CMAKE_CXX_FLAGS_MINSIZEREL}")
   endif()
 else()
   if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "RELEASE" )
@@ -114,33 +121,16 @@ if( LLVM_ENABLE_PIC )
   endif()
 endif()
 
-if(CMAKE_INFO_ARCH_NAME AND NOT MSVC)
-  MESSAGE(STATUS "CMAKE_INFO_ARCH_NAME is ${CMAKE_INFO_ARCH_NAME}")
-  if( CMAKE_INFO_ARCH_NAME STREQUAL "x86" )
+if( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
+  # TODO: support other platforms and toolchains.
+  if( LLVM_BUILD_32_BITS )
     message(STATUS "Building 32 bits executables and libraries.")
     add_llvm_definitions( -m32 )
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -m32")
     set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -m32")
-  elseif(CMAKE_INFO_ARCH_NAME STREQUAL "x64")
-    message(STATUS "Building 64 bits executables and libraries.")
-    add_llvm_definitions( -m64 )
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m64")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -m64")
-    set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -m64")
-  endif(CMAKE_INFO_ARCH_NAME STREQUAL "x86")
-else(CMAKE_INFO_ARCH_NAME AND NOT MSVC)
-  if( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32)
-    # TODO: support other platforms and toolchains.
-    if( LLVM_BUILD_32_BITS )
-      message(STATUS "Building 32 bits executables and libraries.")
-      add_llvm_definitions( -m32 )
-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32")
-      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -m32")
-      set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -m32")
-    endif( LLVM_BUILD_32_BITS )
-  endif( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32)
-endif(CMAKE_INFO_ARCH_NAME AND NOT MSVC)
+  endif( LLVM_BUILD_32_BITS )
+endif( CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT WIN32 )
 
 # On Win32 using MS tools, provide an option to set the number of parallel jobs
 # to use.
@@ -168,10 +158,25 @@ endif()
 if( MSVC )
   include(ChooseMSVCCRT)
 
-  if( MSVC11 )
-    add_llvm_definitions(-D_VARIADIC_MAX=10)
+  if( NOT (${CMAKE_VERSION} VERSION_LESS 2.8.11) )
+    # set stack reserved size to ~10MB
+    # CMake previously automatically set this value for MSVC builds, but the
+    # behavior was changed in CMake 2.8.11 (Issue 12437) to use the MSVC default
+    # value (1 MB) which is not enough for us in tasks such as parsing recursive
+    # C++ templates in Clang.
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /STACK:10000000")
   endif()
 
+  if( MSVC10 )
+    # MSVC 10 will complain about headers in the STL not being exported, but
+    # will not complain in MSVC 11.
+    add_llvm_definitions(
+      -wd4275 # Suppress 'An exported class was derived from a class that was not exported.'
+    )
+  elseif( MSVC11 )
+    add_llvm_definitions(-D_VARIADIC_MAX=10)
+  endif()
+  
   # Add definitions that make MSVC much less annoying.
   add_llvm_definitions(
     # For some reason MS wants to deprecate a bunch of standard functions...
@@ -183,25 +188,18 @@ if( MSVC )
     -D_SCL_SECURE_NO_WARNINGS
 
     # Disabled warnings.
-    -wd4065 # Suppress 'switch statement contains 'default' but no 'case' labels'
     -wd4146 # Suppress 'unary minus operator applied to unsigned type, result still unsigned'
     -wd4180 # Suppress 'qualifier applied to function type has no meaning; ignored'
-    -wd4181 # Suppress 'qualifier applied to reference type; ignored'
-    -wd4224 # Suppress 'nonstandard extension used : formal parameter 'identifier' was previously defined as a type'
     -wd4244 # Suppress ''argument' : conversion from 'type1' to 'type2', possible loss of data'
     -wd4267 # Suppress ''var' : conversion from 'size_t' to 'type', possible loss of data'
-    -wd4275 # Suppress 'An exported class was derived from a class that was not exported.'
-    -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
     -wd4345 # Suppress 'behavior change: an object of POD type constructed with an initializer of the form () will be default-initialized'
     -wd4351 # Suppress 'new behavior: elements of array 'array' will be default initialized'
     -wd4355 # Suppress ''this' : used in base member initializer list'
     -wd4503 # Suppress ''identifier' : decorated name length exceeded, name was truncated'
-    -wd4551 # Suppress 'function call missing argument list'
     -wd4624 # Suppress ''derived class' : destructor could not be generated because a base class destructor is inaccessible'
-    -wd4715 # Suppress ''function' : not all control paths return a value'
-    -wd4722 # Suppress ''function' : destructor never returns, potential memory leak'
     -wd4800 # Suppress ''type' : forcing value to bool 'true' or 'false' (performance warning)'
-
+    -wd4291 # Suppress ''declaration' : no matching operator delete found; memory will not be freed if initialization throws an exception'
+    
     # Promoted warnings.
     -w14062 # Promote 'enumerator in switch of enum is not handled' to level 1 warning.
 
@@ -244,9 +242,6 @@ elseif( LLVM_COMPILER_IS_GCC_COMPATIBLE )
     append_if(USE_NO_MAYBE_UNINITIALIZED "-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
     check_cxx_compiler_flag("-Werror -Wnon-virtual-dtor" CXX_SUPPORTS_NON_VIRTUAL_DTOR_FLAG)
     append_if(CXX_SUPPORTS_NON_VIRTUAL_DTOR_FLAG "-Wnon-virtual-dtor" CMAKE_CXX_FLAGS)
-	check_cxx_compiler_flag("-std=c++11" CXX_SUPPORTS_CPP11)
-	append_if(CXX_SUPPORTS_CPP11 "-std=c++11" CMAKE_CXX_FLAGS)
-	add_llvm_definitions( -U__STRICT_ANSI__ )
   endif (LLVM_ENABLE_WARNINGS)
   if (LLVM_ENABLE_WERROR)
     add_llvm_definitions( -Werror )
@@ -260,6 +255,10 @@ macro(append_common_sanitizer_flags)
   if (NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" AND
       NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "RELWITHDEBINFO")
     add_flag_if_supported("-gline-tables-only")
+  endif()
+  # Use -O1 even in debug mode, otherwise sanitizers slowdown is too large.
+  if (uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
+    add_flag_if_supported("-O1")
   endif()
 endmacro()
 
@@ -283,7 +282,18 @@ if(LLVM_USE_SANITIZER)
   endif()
 endif()
 
+# Turn on -gsplit-dwarf if requested
+if(LLVM_USE_SPLIT_DWARF)
+  add_llvm_definitions("-gsplit-dwarf")
+endif()
 
 add_llvm_definitions( -D__STDC_CONSTANT_MACROS )
 add_llvm_definitions( -D__STDC_FORMAT_MACROS )
 add_llvm_definitions( -D__STDC_LIMIT_MACROS )
+
+# clang doesn't print colored diagnostics when invoked from Ninja
+if (UNIX AND
+    CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
+    CMAKE_GENERATOR STREQUAL "Ninja")
+  append("-fcolor-diagnostics" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+endif()
